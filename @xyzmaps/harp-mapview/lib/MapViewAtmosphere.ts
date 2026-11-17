@@ -48,7 +48,7 @@ const SKY_ATMOSPHERE_ALTITUDE_FACTOR = 0.025;
 /**
  * Maximum altitude that ground atmosphere is visible as the percent of the Earth radius.
  */
-const GROUND_ATMOSPHERE_ALTITUDE_FACTOR = 0.0001;
+const GROUND_ATMOSPHERE_ALTITUDE_FACTOR = 0.022;
 
 /**
  * Utility cache for holding temporary values.
@@ -105,7 +105,7 @@ export class MapViewAtmosphere {
     // TODO: Support for Theme definition should be added.
     //private m_cachedTheme: Theme = { styles: {} };
 
-    private readonly m_lightDirection = new THREE.Vector3(0.0, 1.0, 0.0);
+    private m_lightDirection = new THREE.Vector3(0.0, 1.0, 0.0);
 
     /**
      * Creates and adds `Atmosphere` effects to the scene.
@@ -182,6 +182,27 @@ export class MapViewAtmosphere {
      */
     get enabled(): boolean {
         return this.m_enabled;
+    }
+
+    /**
+     * Sets the world-space light (sun) direction used by the atmosphere scattering shaders.
+     * Takes effect on the next frame via `onBeforeRender` uniform updates.
+     *
+     * @param direction - The new light direction vector (will be copied, not referenced).
+     */
+    setLightDirection(direction: THREE.Vector3): void {
+        this.m_lightDirection.copy(direction);
+        if (this.m_updateCallback) {
+            this.m_updateCallback();
+        }
+    }
+
+    /**
+     * Returns a copy of the current light direction vector.
+     */
+    getLightDirection(target?: THREE.Vector3): THREE.Vector3 {
+        const out = target ?? new THREE.Vector3();
+        return out.copy(this.m_lightDirection);
     }
 
     set lightMode(lightMode: AtmosphereLightMode) {

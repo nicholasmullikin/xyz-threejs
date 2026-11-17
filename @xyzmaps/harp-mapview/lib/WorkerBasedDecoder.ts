@@ -36,6 +36,8 @@ let nextUniqueServiceId = 0;
 export class WorkerBasedDecoder implements ITileDecoder {
     private readonly serviceId: string;
     private m_serviceCreated: boolean = false;
+    /** Serializes concurrent [[connect]] calls so CreateService is not sent twice for the same id. */
+    private m_connectPromise: Promise<void> | undefined;
 
     /**
      * Creates a new `WorkerBasedDecoder`.
@@ -74,19 +76,27 @@ export class WorkerBasedDecoder implements ITileDecoder {
      * Connects to [[WorkerServiceManager]]s in underlying [[ConcurrentWorkerSet]] and creates
      * dedicated [[TileDecoderService]]s in all workers to serve decode requests.
      */
-    async connect(): Promise<void> {
-        await this.workerSet.connect(WorkerServiceProtocol.WORKER_SERVICE_MANAGER_SERVICE_ID);
-        if (!this.m_serviceCreated) {
-            await this.workerSet.broadcastRequest(
-                WorkerServiceProtocol.WORKER_SERVICE_MANAGER_SERVICE_ID,
-                {
-                    type: WorkerServiceProtocol.Requests.CreateService,
-                    targetServiceType: this.decoderServiceType,
-                    targetServiceId: this.serviceId
+    connect(): Promise<void> {
+        if (this.m_connectPromise === undefined) {
+            this.m_connectPromise = (async () => {
+                await this.workerSet.connect(WorkerServiceProtocol.WORKER_SERVICE_MANAGER_SERVICE_ID);
+                if (!this.m_serviceCreated) {
+                    await this.workerSet.broadcastRequest(
+                        WorkerServiceProtocol.WORKER_SERVICE_MANAGER_SERVICE_ID,
+                        {
+                            type: WorkerServiceProtocol.Requests.CreateService,
+                            targetServiceType: this.decoderServiceType,
+                            targetServiceId: this.serviceId
+                        }
+                    );
+                    this.m_serviceCreated = true;
                 }
-            );
-            this.m_serviceCreated = true;
+            })().catch(err => {
+                this.m_connectPromise = undefined;
+                throw err;
+            });
         }
+        return this.m_connectPromise;
     }
 
     /**

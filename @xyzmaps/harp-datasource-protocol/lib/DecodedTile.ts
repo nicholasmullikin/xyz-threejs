@@ -250,6 +250,8 @@ export interface BufferAttribute {
     type: BufferElementType;
     itemCount: number;
     normalized?: boolean;
+    /** Decoder-specific numeric metadata (e.g. terrain min/max elevation for scaling). */
+    metadata?: { [name: string]: number };
 }
 
 /**

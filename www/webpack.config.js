@@ -91,7 +91,6 @@ const mainConfig = merge(commonConfig, {
         }),
         new CopyWebpackPlugin({
             patterns: [
-                require.resolve("three/build/three.min.js"),
                 "_config.yml",
                 {
                     from: "./docs",

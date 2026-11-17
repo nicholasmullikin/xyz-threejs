@@ -31,9 +31,11 @@
     },
     "license": "Apache-2.0",
     "dependencies": {
-        "three": "^0.135.0"
+        "three": "^0.149.0"
     },
     "devDependencies": {
+        "@microsoft/api-extractor": "^7.36.0",
+        "@types/three": "^0.149.0",
         "@xyzmaps/harp-datasource-protocol": "^2.0.0",
         "@xyzmaps/harp-debug-datasource": "^2.0.0",
         "@xyzmaps/harp-features-datasource": "^2.0.0",
@@ -51,10 +53,8 @@
         "@xyzmaps/harp-utils": "^2.0.0",
         "@xyzmaps/harp-vectortile-datasource": "^2.0.0",
         "@xyzmaps/harp-webtile-datasource": "^2.0.0",
-        "@microsoft/api-extractor": "^7.36.0",
-        "@types/three": "^0.129.0",
         "ts-loader": "^9.4.4",
-        "typescript": "^5.1.6",
+        "typescript": "^5.8.3",
         "webpack": "^5.88.1",
         "webpack-cli": "^5.1.4",
         "webpack-merge": "^5.9.0"

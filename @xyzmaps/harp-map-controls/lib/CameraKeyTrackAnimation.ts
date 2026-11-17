@@ -149,8 +149,8 @@ export class CameraKeyTrackAnimation {
         const timestamps = this.m_options.controlPoints.map(point => {
             return point.timestamp;
         });
-        const posValues: [number?] = [];
-        const rotValues: [number?] = [];
+        const posValues: number[] = [];
+        const rotValues: number[] = [];
         this.m_options.controlPoints.map(point => {
             const worldPos = this.m_mapView.projection.projectPoint(point.target);
             posValues.push(worldPos.x);

@@ -12,6 +12,22 @@ import * as THREE from "three";
 import { DisplacedBufferAttribute } from "./DisplacedBufferAttribute";
 import { DisplacedBufferGeometry, DisplacementRange } from "./DisplacedBufferGeometry";
 
+// Helper to ensure attribute is BufferAttribute or InterleavedBufferAttribute
+function getCompatibleAttribute(
+    attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | THREE.GLBufferAttribute | undefined,
+    name: string
+): THREE.BufferAttribute | THREE.InterleavedBufferAttribute {
+    if (!attr) {
+        throw new Error(`Missing required attribute: ${name}`);
+    }
+    if ((attr as any).isGLBufferAttribute) {
+        // Convert to BufferAttribute by cloning (may lose GPU buffer, but needed for CPU ops)
+        // @ts-expect-error: .clone() exists on BufferAttribute
+        return attr.clone() as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+    }
+    return attr as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+}
+
 function isDisplacementMaterial(material: any): material is DisplacementFeature {
     const isDisplacementFeature = hasDisplacementFeature(material);
     assert(isDisplacementFeature, "Material does not support displacement maps.");
@@ -43,16 +59,16 @@ export class DisplacedMesh extends THREE.Mesh {
         // intersection test.
         if (!DisplacedMesh.displacedPositions) {
             DisplacedMesh.displacedPositions = new DisplacedBufferAttribute(
-                geometry.attributes.position,
-                geometry.attributes.normal,
-                geometry.attributes.uv,
+                getCompatibleAttribute(geometry.attributes.position, "position"),
+                getCompatibleAttribute(geometry.attributes.normal, "normal"),
+                getCompatibleAttribute(geometry.attributes.uv, "uv"),
                 displacementMap
             );
         } else {
             DisplacedMesh.displacedPositions.reset(
-                geometry.attributes.position,
-                geometry.attributes.normal,
-                geometry.attributes.uv,
+                getCompatibleAttribute(geometry.attributes.position, "position"),
+                getCompatibleAttribute(geometry.attributes.normal, "normal"),
+                getCompatibleAttribute(geometry.attributes.uv, "uv"),
                 displacementMap
             );
         }
@@ -120,7 +136,7 @@ export class DisplacedMesh extends THREE.Mesh {
         } else {
             super.raycast(raycaster, intersects);
         }
-        super.geometry = this.displacedGeometry.originalGeometry;
+        this.geometry = this.displacedGeometry.originalGeometry;
     }
 
     private get firstMaterial(): THREE.Material {

@@ -4,7 +4,7 @@
  * Licensed under Apache 2.0, see full license in LICENSE
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Theme, ValueMap } from "@xyzmaps/harp-datasource-protocol";
+import { IndexedTechnique, Theme, ValueMap } from "@xyzmaps/harp-datasource-protocol";
 import { ExprPool } from "@xyzmaps/harp-datasource-protocol/lib/ExprPool";
 import { Projection, TileKey, TilingScheme } from "@xyzmaps/harp-geoutils";
 import { assert, LoggerManager } from "@xyzmaps/harp-utils";
@@ -528,6 +528,13 @@ export abstract class DataSource extends THREE.EventDispatcher {
      * @default false.
      */
     abstract getTile(tileKey: TileKey, delayLoad?: boolean): Tile | undefined;
+
+    /** Optional tile-owned material factory. Returning undefined uses the theme material.
+     * Called once at geometry creation; Tile owns disposal of returned materials.
+     */
+    createTileMaterial(_tile: Tile, _technique: IndexedTechnique): THREE.Material | undefined {
+        return undefined;
+    }
 
     /**
      * This method is called by {@link MapView} before the

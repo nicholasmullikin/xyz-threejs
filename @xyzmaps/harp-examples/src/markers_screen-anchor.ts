@@ -147,7 +147,7 @@ export namespace GeoToScreenExample {
 
     function addMapAnchor(mapView: MapView): MapAnchor<THREE.Object3D> {
         const mapAnchor = new THREE.Mesh(
-            new THREE.BoxBufferGeometry(100, 100, 100),
+            new THREE.BoxGeometry(100, 100, 100),
             new THREE.MeshBasicMaterial({ color: "green" })
         ) as MapAnchor;
         mapAnchor.anchor = BERLIN;

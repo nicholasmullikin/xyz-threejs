@@ -74,11 +74,25 @@ export class DebugTile extends Tile {
 
         if (this.projection.type === ProjectionType.Planar) {
             // place the text position at north/west for planar projections.
-            textPosition.set(
-                this.geometry.getAttribute("position").getX(3),
-                this.geometry.getAttribute("position").getY(3),
-                this.geometry.getAttribute("position").getZ(3)
-            );
+            const positionAttr = this.geometry.getAttribute("position");
+            const index = 3; // 4th vertex (north/west corner)
+            let x: number, y: number, z: number;
+
+            if ("getX" in positionAttr && typeof positionAttr.getX === "function") {
+                // BufferAttribute or InterleavedBufferAttribute
+                x = positionAttr.getX(index);
+                y = positionAttr.getY(index);
+                z = positionAttr.getZ(index);
+            } else if ("array" in positionAttr && Array.isArray((positionAttr as any).array)) {
+                // Fallback, should not usually be needed
+                const i = index * 3;
+                x = (positionAttr as any).array[i];
+                y = (positionAttr as any).array[i + 1];
+                z = (positionAttr as any).array[i + 2];
+            } else {
+                throw new Error("Unknown attribute type for position");
+            }
+            textPosition.set(x, y, z);
             textPosition.multiplyScalar(0.95);
 
             this.m_textLayoutStyle = new TextLayoutStyle({

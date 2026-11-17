@@ -631,7 +631,7 @@ export class TileGeometryCreator {
                 let material: THREE.Material | undefined = materials[techniqueIndex];
 
                 if (material === undefined) {
-                    material = createMaterial(
+                    material = tile.dataSource.createTileMaterial(tile, technique) ?? createMaterial(
                         mapView.renderer.capabilities,
                         {
                             technique,

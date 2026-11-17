@@ -264,13 +264,13 @@ export class GlyphTextureCache {
      * @param renderer - WebGLRenderer.
      */
     update(renderer: THREE.WebGLRenderer): void {
-        let oldRenderTarget: THREE.RenderTarget | null = null;
+        let oldRenderTarget: THREE.WebGLRenderTarget | null = null;
 
         const willClearGeometry = this.m_clearGeometryDrawCount > 0;
         const willCopyGeometry = this.m_copyGeometryDrawCount > 0;
 
         if (willClearGeometry || willCopyGeometry) {
-            oldRenderTarget = renderer.getRenderTarget();
+            oldRenderTarget = renderer.getRenderTarget() as THREE.WebGLRenderTarget;
             renderer.setRenderTarget(this.m_rt);
         }
 

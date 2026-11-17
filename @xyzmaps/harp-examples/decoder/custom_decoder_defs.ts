@@ -6,3 +6,4 @@
  */
 
 export const CUSTOM_DECODER_SERVICE_TYPE = "custom_example_decoder_service";
+export const PNG_DECODER_SERVICE_TYPE = "png_decoder_service";

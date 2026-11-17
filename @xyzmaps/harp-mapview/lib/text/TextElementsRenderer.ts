@@ -1168,6 +1168,9 @@ export class TextElementsRenderer {
             return;
         }
         const defaultTextCanvas = this.m_textCanvases.values().next().value;
+        if (!defaultTextCanvas) {
+            return;
+        }
         const defaultFontCatalog = defaultTextCanvas.fontCatalog;
 
         // Initialize glyph-debugging mesh.

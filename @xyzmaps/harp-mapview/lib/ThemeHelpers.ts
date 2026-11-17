@@ -23,7 +23,7 @@ export function toPixelFormat(format: PixelFormat): THREE.PixelFormat {
         case "Alpha":
             return THREE.AlphaFormat;
         case "RGB":
-            return THREE.RGBFormat;
+            return THREE.RGBAFormat;
         case "RGBA":
             return THREE.RGBAFormat;
         case "Luminance":
@@ -31,7 +31,7 @@ export function toPixelFormat(format: PixelFormat): THREE.PixelFormat {
         case "LuminanceAlpha":
             return THREE.LuminanceAlphaFormat;
         case "RGBE":
-            return THREE.RGBEFormat;
+            return THREE.RGBAFormat;
         case "Depth":
             return THREE.DepthFormat;
         case "DepthStencil":

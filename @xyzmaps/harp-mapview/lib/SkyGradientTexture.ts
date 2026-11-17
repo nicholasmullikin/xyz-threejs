@@ -8,7 +8,7 @@
 import { GradientSky } from "@xyzmaps/harp-datasource-protocol";
 import { ProjectionType } from "@xyzmaps/harp-geoutils";
 import { getOptionValue } from "@xyzmaps/harp-utils";
-import { Color, CubeTexture, DataTexture, Line3, Plane, RGBFormat, Texture, Vector3 } from "three";
+import { Color, CubeTexture, DataTexture, Line3, Plane, RGBAFormat, Texture, Vector3 } from "three";
 
 export const DEFAULT_TEXTURE_SIZE = 512;
 export const DEFAULT_MONOMIAL_POWER = 1;
@@ -83,7 +83,7 @@ export class SkyGradientTexture {
             const data = new Uint8Array(3 * this.m_width * this.m_height);
             this.fillTextureData(data, i, topColor, bottomColor, groundColor, sky.monomialPower);
 
-            const texture = new DataTexture(data, this.m_width, this.m_height, RGBFormat);
+            const texture = new DataTexture(data, this.m_width, this.m_height, RGBAFormat);
             texture.needsUpdate = true;
             texture.unpackAlignment = 1;
             this.m_faces.push(texture);

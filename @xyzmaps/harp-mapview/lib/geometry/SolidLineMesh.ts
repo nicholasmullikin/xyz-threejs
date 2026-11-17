@@ -43,7 +43,7 @@ function isSolidLineMaterial(material: THREE.Material | THREE.Material[]): boole
  */
 interface AttributeInfo {
     /** Attribute used for bounding volume creation. */
-    data: THREE.BufferAttribute | THREE.InterleavedBuffer;
+    data: THREE.BufferAttribute | THREE.InterleavedBuffer | THREE.GLBufferAttribute;
 
     /** Version of attribute at time of bounding volume creation. */
     version: number | undefined;
@@ -55,12 +55,13 @@ interface AttributeInfo {
  * @returns The [[AttributeInfo]] containing a reference and version of the attribute's data.
  */
 function getAttributeInfo(
-    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute
+    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | THREE.GLBufferAttribute
 ): AttributeInfo {
     const isBufferAttribute = (attribute as THREE.BufferAttribute).isBufferAttribute === true;
+    const isGLBufferAttribute = (attribute as THREE.GLBufferAttribute).isGLBufferAttribute === true;
 
-    const data = isBufferAttribute
-        ? (attribute as THREE.BufferAttribute)
+    const data = isBufferAttribute || isGLBufferAttribute
+        ? (attribute as THREE.BufferAttribute | THREE.GLBufferAttribute)
         : (attribute as THREE.InterleavedBufferAttribute).data;
 
     return {
@@ -76,19 +77,20 @@ function getAttributeInfo(
  * @returns `true` if the attribute is the same, `false` otherwise.
  */
 function attributeChanged(
-    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | THREE.GLBufferAttribute,
     attrInfo: AttributeInfo
 ): boolean {
     const isBufferAttribute = (attribute as THREE.BufferAttribute).isBufferAttribute === true;
+    const isGLBufferAttribute = (attribute as THREE.GLBufferAttribute).isGLBufferAttribute === true;
 
-    const data = isBufferAttribute
-        ? (attribute as THREE.BufferAttribute)
+    const data = isBufferAttribute || isGLBufferAttribute
+        ? (attribute as THREE.BufferAttribute | THREE.GLBufferAttribute)
         : (attribute as THREE.InterleavedBufferAttribute).data;
 
     return (
         attrInfo === undefined ||
         attrInfo.data !== data ||
-        ((attribute as THREE.BufferAttribute).isBufferAttribute &&
+        ((isBufferAttribute || isGLBufferAttribute) &&
             attrInfo.version !== data.version)
     );
 }
@@ -299,7 +301,13 @@ function intersectFeature(
         // vector.
         line.start.fromBufferAttribute(position, a);
         line.end.fromBufferAttribute(position, b);
-        vExt.set(bitangent.getX(a), bitangent.getY(a), bitangent.getZ(a)).normalize();
+
+        // --- REPLACE THIS LINE ---
+        // vExt.set(bitangent.getX(a), bitangent.getY(a), bitangent.getZ(a)).normalize();
+        // --- WITH: ---
+        const [x, y, z] = getAttributeXYZ(bitangent, a);
+        vExt.set(x, y, z).normalize();
+
         plane.setFromCoplanarPoints(line.start, tmpV3.copy(line.start).add(vExt), line.end);
         if (plane.normal.manhattanLength() === 0) {
             // Invalid plane, coplanar points are actually collinear because:
@@ -415,6 +423,33 @@ function intersectGroup(
         beginIdx = endIdx;
     }
     return featureIdx;
+}
+
+/**
+ * Add this helper function near the other utility functions (e.g., after attributeChanged)
+ */
+function getAttributeXYZ(
+    attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | THREE.GLBufferAttribute,
+    index: number
+): [number, number, number] {
+    if (
+        (attr as THREE.BufferAttribute).isBufferAttribute ||
+        (attr as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute
+    ) {
+        return [
+            (attr as THREE.BufferAttribute).getX(index),
+            (attr as THREE.BufferAttribute).getY(index),
+            (attr as THREE.BufferAttribute).getZ(index)
+        ];
+    } else if ((attr as THREE.GLBufferAttribute).isGLBufferAttribute) {
+        // @ts-ignore: getComponent is not in the type definition, but exists at runtime
+        return [
+            (attr as any).getComponent(index, 0),
+            (attr as any).getComponent(index, 1),
+            (attr as any).getComponent(index, 2)
+        ];
+    }
+    throw new Error("Unsupported attribute type");
 }
 
 /**

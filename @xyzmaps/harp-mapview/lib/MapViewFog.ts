@@ -20,6 +20,7 @@ export class MapViewFog {
     private m_fog: THREE.Fog = new THREE.Fog(0x000000); // Default color asked by DefinitelyTyped.
     private m_fogIsDefined: boolean = false;
     private m_cachedFog: Fog | undefined;
+    private m_fogOverride: THREE.FogBase | null = null;
 
     /**
      * Constructs a `MapViewFog` instance.
@@ -52,6 +53,39 @@ export class MapViewFog {
     }
 
     /**
+     * Sets a user-provided fog that overrides the theme fog. While an override is set,
+     * `reset()` (theme changes) and `update()` (per-frame adjustments) will not modify
+     * `scene.fog`. Call {@link MapViewFog.clearFogOverride} to restore theme-driven fog.
+     *
+     * @param fog - A `THREE.Fog` or `THREE.FogExp2` instance, or `null` to explicitly
+     *              set no fog (blocking the theme from adding its own).
+     */
+    setFogOverride(fog: THREE.FogBase | null): void {
+        this.m_fogOverride = fog;
+        this.m_scene.fog = fog;
+    }
+
+    /**
+     * Removes the fog override, restoring normal theme-driven fog behavior.
+     * If the theme defines fog and `enabled` is true, the theme fog will be re-applied.
+     */
+    clearFogOverride(): void {
+        this.m_fogOverride = null;
+        if (this.m_fogIsDefined && this.m_enabled) {
+            this.add();
+        } else {
+            this.remove();
+        }
+    }
+
+    /**
+     * Returns `true` if a fog override is currently active.
+     */
+    get hasFogOverride(): boolean {
+        return this.m_fogOverride !== null;
+    }
+
+    /**
      * Sets the fog depending on the {@link @xyzmaps/harp-datasource-protocol#Theme}
      * instance provided. This function is called when a
      * theme is loaded. Fog is added only if the theme contains a fog definition with a:
@@ -66,12 +100,12 @@ export class MapViewFog {
         if (fog !== undefined && fog.color !== undefined && fog.startRatio !== undefined) {
             this.m_fogIsDefined = true;
             this.m_fog.color.set(fog.color);
-            if (this.m_enabled && this.m_scene.fog === null) {
+            if (this.m_fogOverride === null && this.m_enabled && this.m_scene.fog === null) {
                 this.add();
             }
         } else {
             this.m_fogIsDefined = false;
-            if (this.m_scene.fog !== null) {
+            if (this.m_fogOverride === null && this.m_scene.fog !== null) {
                 this.remove();
             }
         }
@@ -83,6 +117,9 @@ export class MapViewFog {
      * @param camera - An instance of a `THREE.Camera` with a `far` property.
      */
     update(mapView: MapView, viewDistance?: number) {
+        if (this.m_fogOverride !== null) {
+            return;
+        }
         if (
             this.m_scene.fog !== null &&
             this.m_cachedFog !== undefined &&
@@ -145,6 +182,11 @@ export class MapViewFog {
      * @see https://github.com/mrdoob/three.js/blob/dev/src/renderers/webgl/WebGLProgram.js#L298
      */
     private setFogInRawShaderMaterials(enableFog: boolean) {
+        // Type guard to check if material supports fog
+        function isFogMaterial(mat: THREE.Material): mat is THREE.Material & { fog: boolean } {
+            return 'fog' in mat;
+        }
+
         this.m_scene.traverse(object => {
             if (object instanceof THREE.Mesh) {
                 const material = object.material;
@@ -152,6 +194,7 @@ export class MapViewFog {
                     material instanceof THREE.Material &&
                     // HighPrecisionLineMaterial does not support fog:
                     !(material instanceof HighPrecisionLineMaterial) &&
+                    isFogMaterial(material) &&
                     // We may skip redundant updates:
                     material.fog !== enableFog
                 ) {

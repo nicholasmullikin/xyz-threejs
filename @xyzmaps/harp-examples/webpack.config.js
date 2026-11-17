@@ -19,6 +19,11 @@ const prepareOnly = process.env["PREPARE_ONLY"] === "true";
 
 const harpMapThemePath = path.dirname(require.resolve("@xyzmaps/harp-map-theme/package.json"));
 const harpFontResourcesPath = path.dirname(require.resolve("@xyzmaps/harp-fontcatalog/package.json"));
+/** Single three.js instance for mapview, terrain-datasource, and examples (avoids "Multiple instances" warning). */
+const threePackageRoot = path.join(
+    path.dirname(require.resolve("three", { paths: [__dirname] })),
+    ".."
+);
 
 const isProduction = process.env.NODE_ENV === "production";
 const harpBundleSuffix = isProduction ? ".min" : "";
@@ -59,20 +64,11 @@ function resolveOptional(path, message) {
 const commonConfig = {
     context: __dirname,
     devtool: prepareOnly ? undefined : "source-map",
-    externals: [
-        {
-            three: "THREE"
-        },
-        ({ context, request }, cb) => {
-            return /three\.module\.js$/.test(request)
-                ? cb(null, "THREE")
-                : cb(undefined, undefined);
-        }
-    ],
     resolve: {
         extensions: [".webpack.js", ".web.ts", ".ts", ".tsx", ".web.js", ".js"],
         alias: {
-            "react-native": "react-native-web"
+            "react-native": "react-native-web",
+            three: threePackageRoot
         },
         fallback: {
             fs: false
@@ -177,6 +173,14 @@ const browserConfig = merge(commonConfig, {
             name: "common"
         }
     },
+    devServer: {
+        hot: false,
+        liveReload: true,
+        headers: {
+            "Cache-Control": "no-store"
+        },
+        watchFiles: ["decoder/**/*.ts"]
+    },
     // @ts-ignore
     cache: getCacheConfig("browser")
 });
@@ -254,7 +258,6 @@ const assets = [
         to: "resources/fonts",
         toType: "dir"
     },
-    require.resolve("three/build/three.min.js"),
     {
         from: resolveOptional(
             `@xyzmaps/harp.gl/dist/harp${harpBundleSuffix}.js`,

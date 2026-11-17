@@ -200,7 +200,7 @@ function createFeatureModifier(
         case FeatureModifierId.default:
             return new OmvGenericFeatureModifier(filterDescription);
         default:
-            assert(!"Unrecognized feature modifier id, using default!");
+            assert(false, "Unrecognized feature modifier id, using default!");
             return new OmvGenericFeatureModifier(filterDescription);
     }
 }
@@ -351,7 +351,10 @@ export class OmvDataAdapter implements DataAdapter, OmvVisitor {
 
         // Pass feature modifier method to processFeature if there's any modifier. Get it from any
         // modifier, processFeature will later apply it to all using Function.apply().
-        const modifierFunc = this.m_featureModifiers?.[0].doProcessPointFeature;
+        const modifierFunc =
+            this.m_featureModifiers && this.m_featureModifiers.length > 0
+                ? this.m_featureModifiers[0].doProcessPointFeature
+                : undefined;
 
         const properties = this.filterAndModifyFeature(
             feature,
@@ -548,12 +551,14 @@ export class OmvDataAdapter implements DataAdapter, OmvVisitor {
 
         const properties = readAttributes(this.m_layer, feature);
         const env = new MapEnv(properties);
+        if (!modifierFunc) {
+            return properties;
+        }
         if (
             this.m_featureModifiers?.find(fm => {
                 // TODO: The logic of feature ignore should be actually in the feature filtering
                 // mechanism - see OmvFeatureFilter.
-                assert(modifierFunc !== undefined);
-                return !modifierFunc!.apply(fm, [layerName, env, this.m_tileKey.level]);
+                return !modifierFunc.apply(fm, [layerName, env, this.m_tileKey.level]);
             }) !== undefined
         ) {
             return undefined;

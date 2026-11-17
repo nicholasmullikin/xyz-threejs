@@ -160,15 +160,31 @@ function createGroundPlaneGeometry(
     // Use 64bits floats for world coordinates to avoid precision issues on coordinate
     // tranformations. The array must be converted to single precision before rendering.
     const bufferArray = useLocalTargetCoords ? new Float32Array(12) : new Float64Array(12);
-    const posAttr = new THREE.BufferAttribute(bufferArray, 3).copyVector3sArray(cornersArray);
+    
+    // Manually copy Vector3 components into the buffer array
+    for (let i = 0; i < cornersArray.length; i++) {
+        const corner = cornersArray[i];
+        bufferArray[i * 3] = corner.x;
+        bufferArray[i * 3 + 1] = corner.y;
+        bufferArray[i * 3 + 2] = corner.z;
+    }
+    
+    const posAttr = new THREE.BufferAttribute(bufferArray, 3);
     geometry.setAttribute("position", posAttr);
 
     if (receiveShadow) {
         // Webmercator needs to have it negated to work correctly.
         sourceProjection.surfaceNormal(tileCorners.sw, tmpV).negate();
-        const normAttr = new THREE.BufferAttribute(new Float32Array(12), 3).copyVector3sArray(
-            Array(4).fill(tmpV)
-        );
+        
+        // Manually copy Vector3 components for normals
+        const normalArray = new Float32Array(12);
+        for (let i = 0; i < 4; i++) {
+            normalArray[i * 3] = tmpV.x;
+            normalArray[i * 3 + 1] = tmpV.y;
+            normalArray[i * 3 + 2] = tmpV.z;
+        }
+        
+        const normAttr = new THREE.BufferAttribute(normalArray, 3);
         geometry.setAttribute("normal", normAttr);
     }
     geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 2, 1, 3]), 1));

@@ -4,8 +4,9 @@
  * Licensed under Apache 2.0, see full license in LICENSE
  * SPDX-License-Identifier: Apache-2.0
  */
-import "three/examples/js/controls/TrackballControls";
+// import "three/examples/js/controls/TrackballControls";
 
+import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
 import { Theme } from "@xyzmaps/harp-datasource-protocol";
 import { GeoCoordinates } from "@xyzmaps/harp-geoutils";
 import { MapControls, MapControlsUI } from "@xyzmaps/harp-map-controls";
@@ -75,7 +76,7 @@ function setupDebugStuff() {
     map.scene.add(debugCamera);
     debugCamera.position.set(6000, 2000, 1000);
 
-    trackball = new (THREE as any).TrackballControls(debugCamera, map.canvas);
+    trackball = new TrackballControls(debugCamera, map.canvas);
     trackball.enabled = false;
     trackball.addEventListener("start", () => {
         map.beginAnimation();

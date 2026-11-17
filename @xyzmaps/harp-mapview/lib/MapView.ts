@@ -84,7 +84,7 @@ import { TextElementsRendererOptions } from "./text/TextElementsRendererOptions"
 import { Tile } from "./Tile";
 import { TileObjectRenderer } from "./TileObjectsRenderer";
 import { MapViewUtils } from "./Utils";
-import { ResourceComputationType, VisibleTileSet, VisibleTileSetOptions } from "./VisibleTileSet";
+import { DataSourceTileList, ResourceComputationType, VisibleTileSet, VisibleTileSetOptions } from "./VisibleTileSet";
 
 declare const process: any;
 
@@ -140,6 +140,12 @@ export enum MapViewEventNames {
     ContextRestored = "webglcontext-restored",
     /** Called when camera position has been changed. */
     CameraPositionChanged = "camera-changed",
+    /**
+     * Called after all visible tile objects have been attached to the scene root for this frame,
+     * but before the actual render pass. Use this to apply custom materials, textures, or
+     * visibility overrides to tile meshes without polling.
+     */
+    TilesRendered = "tiles-rendered",
     /** Called when dispose has been called, before any cleanup is done. */
     Dispose = "dispose"
 }
@@ -334,6 +340,8 @@ export interface MapViewOptions extends TextElementsRendererOptions, Partial<Loo
      * @default {@link TiltViewClipPlanesEvaluator}
      */
     clipPlanesEvaluator?: ClipPlanesEvaluator;
+    /** Preserve depth precision for scenes spanning ground level to orbit. */
+    logarithmicDepthBuffer?: boolean;
 
     /**
      * Set to true to extend the frustum culling. This improves the rejection of some tiles, which
@@ -707,6 +715,10 @@ export class MapView extends EventDispatcher {
         type: MapViewEventNames.FrameComplete
     };
 
+    private readonly TILES_RENDERED_EVENT: RenderEvent = {
+        type: MapViewEventNames.TilesRendered
+    };
+
     private readonly THEME_LOADED_EVENT: RenderEvent = {
         type: MapViewEventNames.ThemeLoaded
     };
@@ -988,6 +1000,7 @@ export class MapView extends EventDispatcher {
         // Initialization of the renderer, enable backward compatibility with three.js <= 0.117
         this.m_renderer = new ((THREE as any).WebGL1Renderer ?? THREE.WebGLRenderer)({
             canvas: this.canvas,
+            logarithmicDepthBuffer: options.logarithmicDepthBuffer === true,
             context: this.m_options.context,
             antialias: this.nativeWebglAntialiasEnabled,
             alpha: this.m_options.alpha,
@@ -1228,6 +1241,7 @@ export class MapView extends EventDispatcher {
      * cleanup, you must ensure that all references to this `MapView` are removed.
      */
     dispose(freeContext = true) {
+        if (this.m_disposed) return;
         // Enforce listeners that we are about to dispose.
         this.DISPOSE_EVENT.time = Date.now();
         this.dispatchEvent(this.DISPOSE_EVENT);
@@ -1251,6 +1265,7 @@ export class MapView extends EventDispatcher {
             dataSource.dispose();
         }
         this.m_visibleTiles.clearTileCache();
+        this.m_visibleTiles.disposePendingTiles();
         this.m_textElementsRenderer.clearRenderStates();
         this.m_renderer.dispose();
 
@@ -2104,7 +2119,7 @@ export class MapView extends EventDispatcher {
             await dataSource.connect();
 
             const alreadyRemoved = !this.m_tileDataSources.includes(dataSource);
-            if (alreadyRemoved) {
+            if (alreadyRemoved || this.disposed) {
                 return;
             }
             dataSource.addEventListener(MapViewEventNames.Update, () => {
@@ -2127,6 +2142,7 @@ export class MapView extends EventDispatcher {
 
             this.update();
         } catch (error) {
+            if (this.disposed || !this.m_tileDataSources.includes(dataSource)) return;
             // error is a string if a promise was rejected.
             logger.error(
                 `Failed to connect to datasource ${dataSource.name}: ${
@@ -2901,6 +2917,23 @@ export class MapView extends EventDispatcher {
         return this.m_sceneEnvironment.fog;
     }
 
+    /**
+     * Controls visibility of the background data source (the ground-plane tiles that fill
+     * in behind vector/raster tiles). Set to `false` to hide background tiles entirely —
+     * useful when custom terrain fully covers the globe.
+     *
+     * @param visible - Whether background tiles should be rendered.
+     */
+    setBackgroundVisible(visible: boolean): void {
+        for (const ds of this.m_tileDataSources) {
+            if (ds instanceof BackgroundDataSource) {
+                ds.enabled = visible;
+                break;
+            }
+        }
+        this.update();
+    }
+
     private setPostEffects() {
         // First clear all the effects, then enable them from what is specified.
         this.mapRenderingManager.bloom.enabled = false;
@@ -2928,6 +2961,12 @@ export class MapView extends EventDispatcher {
     /**
      * Returns the elevation provider.
      */
+    /** Register sampling/picking for geometry that already contains elevation. */
+    setElevationProvider(provider: ElevationProvider | undefined): void {
+        this.m_elevationProvider = provider;
+        this.update();
+    }
+
     get elevationProvider(): ElevationProvider | undefined {
         return this.m_elevationProvider;
     }
@@ -3347,6 +3386,11 @@ export class MapView extends EventDispatcher {
     /**
      * Renders the current frame.
      */
+    /** Optional camera constraint, evaluated before camera matrices and visibility. */
+    beforeCameraUpdate?: () => void;
+    /** Runs after geometry selection and before tile objects are submitted for drawing. */
+    prepareRenderTiles?: (entries: ReadonlyArray<DataSourceTileList>) => void;
+
     private render(frameStartTime: number): void {
         if (this.m_drawing) {
             return;
@@ -3406,6 +3450,7 @@ export class MapView extends EventDispatcher {
             this.m_renderer.setPixelRatio(this.pixelRatio);
         }
 
+        this.beforeCameraUpdate?.();
         this.updateCameras();
         this.updateEnv();
 
@@ -3440,6 +3485,7 @@ export class MapView extends EventDispatcher {
         }
 
         const renderList = this.m_visibleTiles.dataSourceTileList;
+        this.prepareRenderTiles?.(renderList);
 
         // no need to check everything if we're not going to create text renderer.
         renderList.forEach(({ zoomLevel, renderedTiles }) => {
@@ -3460,6 +3506,9 @@ export class MapView extends EventDispatcher {
                 tile.frameNumLastVisible = this.m_frameNumber;
             });
         });
+
+        this.TILES_RENDERED_EVENT.time = frameStartTime;
+        this.dispatchEvent(this.TILES_RENDERED_EVENT);
 
         this.m_mapAnchors.update(
             this.projection,
@@ -3704,6 +3753,7 @@ export class MapView extends EventDispatcher {
             return this.m_thisFrameTilesChanged;
         }
         const renderList = this.m_visibleTiles.dataSourceTileList;
+        this.prepareRenderTiles?.(renderList);
 
         const tileIdList: string[] = [];
 

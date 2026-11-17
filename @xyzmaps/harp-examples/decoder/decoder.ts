@@ -9,19 +9,21 @@ declare let self: Worker & {
     importScripts(..._scripts: string[]): void;
 };
 
-self.importScripts("three.min.js");
-
 import {
     GeoJsonTilerService,
     VectorTileDecoderService
 } from "@xyzmaps/harp-vectortile-datasource/index-worker";
 
 import { CustomDecoderService } from "./custom_decoder";
+import { PNGTileDecoderService } from "./png_decoder";
 
+PNGTileDecoderService.start();
 VectorTileDecoderService.start();
 GeoJsonTilerService.start();
-
 //Following code is only needed for datasource_custom example.
 // snippet:custom_datasource_example_custom_decoder_service_start.ts
 CustomDecoderService.start();
+
 // end:custom_datasource_example_custom_decoder_service_start.ts
+
+import "../src/earth/building-decoder";

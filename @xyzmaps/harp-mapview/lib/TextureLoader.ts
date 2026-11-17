@@ -52,7 +52,7 @@ export class TextureLoader {
             blob.type === "image/jpeg/" ||
             url.search(/\.jpe?g($|\?)/i) > 0 ||
             url.search(/^data\:image\/jpeg/) === 0;
-        texture.format = isJPEG ? THREE.RGBFormat : THREE.RGBAFormat;
+        texture.format = isJPEG ? THREE.RGBAFormat : THREE.RGBAFormat;
 
         return texture;
     }

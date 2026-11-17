@@ -8,23 +8,23 @@
     ],
     "devDependencies": {
         "@types/express": "^4.17.9",
-        "@types/serve-static": "^1.15.2",
         "@types/fs-extra": "^9.0.7",
         "@types/glob": "^8.1.0",
         "@types/semver": "^7.5.0",
+        "@types/serve-static": "^1.15.2",
         "@types/stats.js": "^0.17.0",
-        "@types/three": "^0.129.0",
+        "@types/three": "^0.149.0",
         "commander": "^5.1.0",
         "express": "^4.17.9",
         "fork-ts-checker-webpack-plugin": "^8.0.0",
         "fs-extra": "^9.0.7",
         "glob": "^10.3.1",
         "mkpath": "^1.0.0",
-        "node-fetch": "3.3.1",
+        "prettier": "^3.5.3",
         "semver": "^7.3.2",
-        "three": "^0.135.0",
+        "three": "^0.149.0",
         "typedoc": "^0.24.8",
-        "typescript": "^5.1.6",
+        "typescript": "^5.8.3",
         "webpack": "^5.88.1",
         "webpack-cli": "^5.1.4",
         "webpack-dev-server": "^4.15.1",
@@ -33,13 +33,15 @@
     "scripts": {
         "build": "npm run build-bundle && npm run build-examples",
         "start": "webpack serve --config @xyzmaps/harp-examples/webpack.config.js",
-
         "build-examples": "webpack --config @xyzmaps/harp-examples/webpack.config.js",
         "build-bundle": "cd @xyzmaps/harp.gl && webpack",
         "build-www": "cd www && yarn build",
         "start-www": "cd www && yarn start",
-
-        "typedoc": "typedoc --options typedoc.json"
+        "typedoc": "typedoc --options typedoc.json",
+        "format": "prettier --write \"@xyzmaps/*/lib/**/*.ts\" \"@xyzmaps/*/src/**/*.ts\" \"www/src/**/*.ts\"",
+        "format:check": "prettier --check \"@xyzmaps/*/lib/**/*.ts\" \"@xyzmaps/*/src/**/*.ts\" \"www/src/**/*.ts\"",
+        "build:earth": "node scripts/build-earth.cjs",
+        "typecheck:earth": "tsc --project @xyzmaps/harp-examples/tsconfig.earth.json --noEmit"
     },
     "engines": {
         "node": ">=18.0.0",
@@ -55,5 +57,6 @@
         "name": "XYZ maps contributors",
         "url": "https://xyzmaps.org"
     },
-    "license": "Apache-2.0"
+    "license": "Apache-2.0",
+    "packageManager": "yarn@4.9.2"
 }

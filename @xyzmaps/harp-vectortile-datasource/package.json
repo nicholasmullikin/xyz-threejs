@@ -44,25 +44,25 @@
         "protobufjs": "^6.9.0"
     },
     "devDependencies": {
-        "@xyzmaps/harp-fetch": "^2.0.0",
-        "@xyzmaps/harp-test-utils": "^2.0.0",
         "@types/chai": "^4.2.14",
         "@types/earcut": "^2.1.1",
         "@types/long": "^4.0.1",
         "@types/mocha": "^8.2.0",
         "@types/node": "^14.0.5",
         "@types/sinon": "^9.0.10",
-        "@types/three": "^0.129.0",
+        "@types/three": "^0.149.0",
+        "@xyzmaps/harp-fetch": "^2.0.0",
+        "@xyzmaps/harp-test-utils": "^2.0.0",
         "chai": "^4.0.2",
         "copyfiles": "^2.2.0",
         "cross-env": "^7.0.2",
         "mocha": "^8.2.1",
         "sinon": "^15.2.0",
         "source-map-support": "^0.5.19",
-        "typescript": "^5.1.6"
+        "typescript": "^5.8.3"
     },
     "peerDependencies": {
-        "three": "^0.135.0"
+        "three": "^0.149.0"
     },
     "publishConfig": {
         "access": "public"

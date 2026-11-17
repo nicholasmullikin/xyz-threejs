@@ -6,13 +6,14 @@
  */
 
 import * as THREE from "three";
+import type { Intersection as RaycasterIntersection } from "three/src/core/Raycaster";
 
 import { MapObjectAdapter } from "./MapObjectAdapter";
 
 function intersectObject(
     object: THREE.Object3D,
     raycaster: PickingRaycaster,
-    intersects: THREE.Intersection[],
+    intersects: RaycasterIntersection[],
     recursive?: boolean
 ) {
     if (object.layers.test(raycaster.layers) && object.visible) {
@@ -48,31 +49,28 @@ export class PickingRaycaster extends THREE.Raycaster {
 
     // HARP-9585: Override of base class method, however tslint doesn't recognize overrides of
     // three.js classes.
-    intersectObject(
+    override intersectObject<TIntersected extends THREE.Object3D>(
         object: THREE.Object3D,
         recursive?: boolean,
-        optionalTarget?: THREE.Intersection[]
-    ): THREE.Intersection[] {
-        const intersects: THREE.Intersection[] = optionalTarget ?? [];
-
-        intersectObject(object, this, intersects, recursive);
-
+        optionalTarget?: Array<RaycasterIntersection<TIntersected>>
+    ): Array<RaycasterIntersection<TIntersected>> {
+        const intersects: Array<RaycasterIntersection<TIntersected>> = optionalTarget ?? [];
+        // The local helper expects THREE.Intersection[], so cast as needed
+        intersectObject(object, this, intersects as unknown as RaycasterIntersection[], recursive);
         return intersects;
     }
 
     // HARP-9585: Override of base class method, however tslint doesn't recognize overrides of
     // three.js classes.
-    intersectObjects(
+    override intersectObjects<TIntersected extends THREE.Object3D>(
         objects: THREE.Object3D[],
         recursive?: boolean,
-        optionalTarget?: THREE.Intersection[]
-    ): THREE.Intersection[] {
-        const intersects: THREE.Intersection[] = optionalTarget ?? [];
-
+        optionalTarget?: Array<RaycasterIntersection<TIntersected>>
+    ): Array<RaycasterIntersection<TIntersected>> {
+        const intersects: Array<RaycasterIntersection<TIntersected>> = optionalTarget ?? [];
         for (const object of objects) {
-            intersectObject(object, this, intersects, recursive);
+            intersectObject(object, this, intersects as unknown as RaycasterIntersection[], recursive);
         }
-
         return intersects;
     }
 }

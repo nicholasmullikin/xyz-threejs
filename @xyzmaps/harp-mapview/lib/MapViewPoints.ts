@@ -92,7 +92,16 @@ export abstract class MapViewPoints extends THREE.Points {
         const point = new THREE.Vector3();
         const index = geometry.index;
         const attributes = geometry.attributes;
-        const positions = attributes.position.array;
+        let positions: ArrayLike<number>;
+        const positionAttr = attributes.position;
+        if (
+            positionAttr instanceof THREE.BufferAttribute ||
+            positionAttr instanceof THREE.InterleavedBufferAttribute
+        ) {
+            positions = positionAttr.array;
+        } else {
+            throw new Error("Unsupported attribute type for positions");
+        }
         if (index !== null) {
             const indices = index.array;
             for (let i = 0, il = indices.length; i < il; i++) {

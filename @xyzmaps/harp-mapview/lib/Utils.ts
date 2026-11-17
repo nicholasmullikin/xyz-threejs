@@ -805,7 +805,7 @@ export namespace MapViewUtils {
             const height = distance * Math.cos(pitchRad);
             result.add(tangentSpace.y).add(tangentSpace.z.setLength(height));
 
-            const a = EarthConstants.EQUATORIAL_RADIUS + altitude;
+            const a = EarthConstants.EQUATORIAL_RADIUS + (targetCoordinates.altitude || 0) + altitude;
             const b = Math.sin(pitchRad) * distance;
             const cameraHeight = Math.sqrt(a * a + b * b);
             result.setLength(cameraHeight);

@@ -9,6 +9,25 @@ import * as THREE from "three";
 
 import { DisplacedBufferAttribute } from "./DisplacedBufferAttribute";
 
+// Helper to ensure attribute is BufferAttribute or InterleavedBufferAttribute
+function getCompatibleAttribute(
+    attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | THREE.GLBufferAttribute | undefined,
+    name: string
+): THREE.BufferAttribute | THREE.InterleavedBufferAttribute {
+    if (!attr) {
+        throw new Error(`Missing required attribute: ${name}`);
+    }
+    // GLBufferAttribute is not compatible, convert to BufferAttribute if possible
+    // GLBufferAttribute has isGLBufferAttribute === true
+    // BufferAttribute and InterleavedBufferAttribute have isBufferAttribute / isInterleavedBufferAttribute
+    if ((attr as any).isGLBufferAttribute) {
+        // Convert to BufferAttribute by cloning (may lose GPU buffer, but needed for CPU ops)
+        // @ts-expect-error: .clone() exists on BufferAttribute
+        return attr.clone() as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+    }
+    return attr as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+}
+
 const tmpV1 = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const tmpBox = new THREE.Box3();
@@ -71,9 +90,9 @@ export class DisplacedBufferGeometry extends THREE.BufferGeometry {
         super();
         if (!displacedPositions) {
             this.m_displacedPositions = new DisplacedBufferAttribute(
-                originalGeometry.attributes.position,
-                originalGeometry.attributes.normal,
-                originalGeometry.attributes.uv,
+                getCompatibleAttribute(originalGeometry.attributes.position, "position"),
+                getCompatibleAttribute(originalGeometry.attributes.normal, "normal"),
+                getCompatibleAttribute(originalGeometry.attributes.uv, "uv"),
                 displacementMap
             );
         } else {
@@ -93,10 +112,11 @@ export class DisplacedBufferGeometry extends THREE.BufferGeometry {
         displacementMap: THREE.DataTexture,
         displacementRange: DisplacementRange
     ) {
+    
         this.originalGeometry = geometry;
-        const positions = geometry.attributes.position;
-        const normals = geometry.attributes.normal;
-        const uvs = geometry.attributes.uv;
+        const positions = getCompatibleAttribute(geometry.attributes.position, "position");
+        const normals = getCompatibleAttribute(geometry.attributes.normal, "normal");
+        const uvs = getCompatibleAttribute(geometry.attributes.uv, "uv");
         this.m_displacedPositions.reset(positions, normals, uvs, displacementMap);
         const displacementRangeChanged =
             this.displacementRange.min !== displacementRange.min ||

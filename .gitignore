@@ -10,3 +10,6 @@ doc/
 lerna-debug.log
 yarn-error.log
 yarn.lock
+
+# Earth builds record and verify their dependency lock.
+!/yarn.lock

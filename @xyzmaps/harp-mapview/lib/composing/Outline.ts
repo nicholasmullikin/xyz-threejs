@@ -220,11 +220,11 @@ export class OutlineEffect {
 
     renderOutline(scene: THREE.Scene, camera: THREE.Camera) {
         const currentAutoClear = this.m_renderer.autoClear;
-        const currentSceneAutoUpdate = scene.autoUpdate;
+        const currentSceneMatrixAutoUpdate = scene.matrixAutoUpdate;
         const currentSceneBackground = scene.background;
         const currentShadowMapEnabled = this.m_renderer.shadowMap.enabled;
 
-        scene.autoUpdate = false;
+        scene.matrixAutoUpdate = false;
         scene.background = null;
         this.m_renderer.autoClear = false;
         this.m_renderer.shadowMap.enabled = false;
@@ -237,7 +237,7 @@ export class OutlineEffect {
 
         this.cleanupCache();
 
-        scene.autoUpdate = currentSceneAutoUpdate;
+        scene.matrixAutoUpdate = currentSceneMatrixAutoUpdate;
         scene.background = currentSceneBackground;
         this.m_renderer.autoClear = currentAutoClear;
         this.m_renderer.shadowMap.enabled = currentShadowMapEnabled;
@@ -289,7 +289,26 @@ export class OutlineEffect {
 
         const isFadingMaterial = FadingFeature.isDefined(originalMaterial as FadingFeature);
 
-        const uniforms: UniformsType = { ...originalUniforms, ...this.m_uniformsChunk };
+        // Merge fog uniforms for fog support
+        const uniforms: UniformsType = {
+            ...originalUniforms,
+            ...this.m_uniformsChunk,
+            // ...THREE.UniformsLib.fog
+        };
+
+        // // Defensive: ensure fogColor, fogNear, fogFar, fogDensity are present
+        // if (uniforms.fogColor === undefined) {
+        //     uniforms.fogColor = { value: new THREE.Color(0x000000) };
+        // }
+        // if (uniforms.fogNear === undefined) {
+        //     uniforms.fogNear = { value: 1 };
+        // }
+        // if (uniforms.fogFar === undefined) {
+        //     uniforms.fogFar = { value: 1000 };
+        // }
+        // if (uniforms.fogDensity === undefined) {
+        //     uniforms.fogDensity = { value: 0.00025 };
+        // }
 
         const vertexShader = originalVertexShader
             // put vertexShaderChunk right before "void main() {...}"
@@ -340,8 +359,6 @@ export class OutlineEffect {
             vertexShader,
             fragmentShader,
             side: THREE.BackSide,
-            morphTargets: false,
-            morphNormals: false,
             fog: false,
             blending: THREE.CustomBlending,
             blendSrc: THREE.SrcAlphaFactor,
@@ -461,7 +478,7 @@ export class OutlineEffect {
         const outlineParameters = originalMaterial.userData.outlineParameters;
 
         const outlineUniforms = (material as THREE.ShaderMaterial).uniforms;
-        outlineUniforms.outlineAlpha.value = originalMaterial.opacity;
+            outlineUniforms.outlineAlpha.value = originalMaterial.opacity;
 
         const originalUniforms =
             (originalMaterial as any).shaderUniforms !== undefined
@@ -511,7 +528,7 @@ export class OutlineEffect {
         (material as any).skinning = (originalMaterial as any).skinning;
         (material as any).morphTargets = (originalMaterial as any).morphTargets;
         (material as any).morphNormals = (originalMaterial as any).morphNormals;
-        material.fog = originalMaterial.fog;
+        (material as any).fog = (originalMaterial as any).fog;
 
         if (outlineParameters !== undefined) {
             material.visible =

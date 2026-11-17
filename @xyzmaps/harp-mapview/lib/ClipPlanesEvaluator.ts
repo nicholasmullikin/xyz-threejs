@@ -489,7 +489,10 @@ export class TopViewClipPlanesEvaluator extends ElevationBasedClipPlanesEvaluato
         let farPlane =
             halfFovAngle > alpha
                 ? farTangent
-                : this.getFovBasedFarPlane(camera, d, r, 2 * halfFovAngle, projection);
+                : Math.max(
+                      this.getFovBasedFarPlane(camera, d, r, 2 * halfFovAngle, projection),
+                      farTangent
+                  );
         // In extreme cases the largest depression assumed may be further than tangent
         // based far plane distance, take it into account
         const farMin = cameraAltitude - this.minElevation;
@@ -752,10 +755,11 @@ export class TiltViewClipPlanesEvaluator extends TopViewClipPlanesEvaluator {
         const maxR = r + this.maxElevation;
         const d = camera.position.length();
 
-        // If all frustum edges intersect the world, use as far distance the distance to the
-        // farthest intersection projected on eye vector. If principal point has a y offset <= 0,
-        // top frustum intersection is at same distance or farther than bottom intersection,
-        // otherwise both need to be checked.
+        // Always compute the elevated-horizon distance so that geometry extending
+        // above the base sphere (exaggerated terrain) remains visible even when
+        // all frustum corners still intersect the ground sphere.
+        const horizonFar = SphericalProj.getFarDistanceFromElevatedHorizon(camera, d, r, maxR);
+
         CameraUtils.getPrincipalPoint(camera, this.m_tmpV2);
         const isRightIntersectionFarther = this.m_tmpV2.x <= 0.0;
         const ndcX = isRightIntersectionFarther ? 1 : -1;
@@ -775,12 +779,10 @@ export class TiltViewClipPlanesEvaluator extends TopViewClipPlanesEvaluator {
             : 0;
         const largestDist = Math.max(topDist ?? Infinity, bottomDist ?? Infinity);
         if (largestDist !== Infinity) {
-            return largestDist;
+            return Math.max(largestDist, horizonFar);
         }
 
-        // If any frustum edge does not intersect (i.e horizon is visible in that viewport corner),
-        // use the horizon distance at the maximum elevation.
-        return SphericalProj.getFarDistanceFromElevatedHorizon(camera, d, r, maxR);
+        return horizonFar;
     }
 
     private applyViewRangeConstraints(
@@ -799,7 +801,7 @@ export class TiltViewClipPlanesEvaluator extends TopViewClipPlanesEvaluator {
 
         // Apply the constraints.
         const farMin = projection.groundDistance(camera.position) - this.minElevation;
-        const farMax = distance * this.farMaxRatio;
+        const farMax = Math.max(distance, this.maxElevation) * this.farMaxRatio;
         viewRanges.near = Math.max(viewRanges.near, this.nearMin);
         viewRanges.far = THREE.MathUtils.clamp(viewRanges.far, farMin, farMax);
 

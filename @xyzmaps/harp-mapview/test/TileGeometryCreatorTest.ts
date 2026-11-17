@@ -434,7 +434,7 @@ describe("TileGeometryCreator", () => {
         )[0];
 
         // create a three.js box geometry
-        const boxGeometry = new THREE.BoxBufferGeometry(100, 100, 1);
+        const boxGeometry = new THREE.BoxGeometry(100, 100, 1);
 
         // encode the three.js geometry so it can be trasferred using
         // DecodedTile.

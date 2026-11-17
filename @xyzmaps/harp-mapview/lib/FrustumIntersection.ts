@@ -87,6 +87,7 @@ export class FrustumIntersection {
     private readonly m_mapTileCuller: MapTileCuller;
     private m_rootTileKeys: TileKeyEntry[] = [];
     private readonly m_tileKeyEntries: ZoomLevelTileKeyMap = new Map();
+    private m_prevSubdivided: Set<number> = new Set();
 
     constructor(
         private readonly m_camera: THREE.PerspectiveCamera,
@@ -206,6 +207,12 @@ export class FrustumIntersection {
             }
         }
 
+        // Hysteresis: tiles subdivided last frame need a larger area drop before
+        // they're collapsed back to their parent, preventing LOD oscillation.
+        const LOD_HYSTERESIS = 0.7;
+        const prevSubdivided = this.m_prevSubdivided;
+        const curSubdivided = new Set<number>();
+
         const workList = [...this.m_rootTileKeys.values()];
         while (workList.length > 0) {
             const tileEntry = workList.pop();
@@ -224,12 +231,21 @@ export class FrustumIntersection {
                 continue;
             }
 
-            // Stop subdivision if area of tile is too small(mixed LOD only)
-            if (this.m_enableMixedLod && tileEntry.area < targetTileArea) {
-                continue;
+            const tileKeyAndOffset = TileKeyUtils.getKeyForTileKeyAndOffset(tileKey, offset);
+
+            // Stop subdivision if area of tile is too small (mixed LOD only).
+            // Apply hysteresis so tiles that were already subdivided require a
+            // significantly smaller area before collapsing back to their parent.
+            if (this.m_enableMixedLod) {
+                const threshold = prevSubdivided.has(tileKeyAndOffset)
+                    ? targetTileArea * LOD_HYSTERESIS
+                    : targetTileArea;
+                if (tileEntry.area < threshold) {
+                    continue;
+                }
             }
 
-            const tileKeyAndOffset = TileKeyUtils.getKeyForTileKeyAndOffset(tileKey, offset);
+            curSubdivided.add(tileKeyAndOffset);
 
             // delete parent tile key from applicable zoom levels
             for (const zoomLevel of uniqueZoomLevels) {
@@ -272,6 +288,7 @@ export class FrustumIntersection {
                 }
             }
         }
+        this.m_prevSubdivided = curSubdivided;
         return { tileKeyEntries: this.m_tileKeyEntries, calculationFinal: cache.calculationFinal };
     }
 
