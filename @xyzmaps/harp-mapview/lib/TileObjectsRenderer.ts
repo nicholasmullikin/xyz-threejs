@@ -10,7 +10,8 @@ import {
     getPropertyValue,
     IndexedTechnique,
     MapEnv,
-    Pickability, ValueMap
+    Pickability,
+    ValueMap
 } from "@xyzmaps/harp-datasource-protocol";
 
 import { BackgroundDataSource } from "./BackgroundDataSource";
@@ -38,7 +39,10 @@ export class TileObjectRenderer {
     // Valid values start at 1, because the screen is cleared to zero
     private m_stencilValue: number = DEFAULT_STENCIL_VALUE;
 
-    constructor(private readonly m_env: MapEnv, private readonly m_renderer: THREE.WebGLRenderer) {}
+    constructor(
+        private readonly m_env: MapEnv,
+        private readonly m_renderer: THREE.WebGLRenderer
+    ) {}
 
     render(
         tile: Tile,
@@ -68,7 +72,7 @@ export class TileObjectRenderer {
                 if (tile.localTangentSpace) {
                     object.setRotationFromMatrix(tile.boundingBox.getRotationMatrix());
                 }
-                object.frustumCulled = false;
+                object.frustumCulled = tile.dataSource.enableObjectFrustumCulling === true;
 
                 rootNode.add(object);
             }

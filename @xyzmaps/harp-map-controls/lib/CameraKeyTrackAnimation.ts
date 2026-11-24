@@ -13,7 +13,7 @@ import {
     RenderEvent
 } from "@xyzmaps/harp-mapview";
 import { LoggerManager } from "@xyzmaps/harp-utils";
-import THREE = require("three");
+import * as THREE from "three";
 
 const logger = LoggerManager.instance.create("CameraKeyTrackAnimation");
 const MIN_DISTANCE = 0;

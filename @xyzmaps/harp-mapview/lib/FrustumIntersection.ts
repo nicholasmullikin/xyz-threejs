@@ -95,7 +95,8 @@ export class FrustumIntersection {
         private readonly m_extendedFrustumCulling: boolean,
         private readonly m_tileWrappingEnabled: boolean,
         private readonly m_enableMixedLod: boolean,
-        private readonly m_tilePixelSize: number = 256
+        private readonly m_tilePixelSize: number = 256,
+        private readonly m_useTerrainFootprintLod: boolean = false
     ) {
         this.m_mapTileCuller = new MapTileCuller(m_camera);
     }
@@ -210,6 +211,7 @@ export class FrustumIntersection {
         // Hysteresis: tiles subdivided last frame need a larger area drop before
         // they're collapsed back to their parent, preventing LOD oscillation.
         const LOD_HYSTERESIS = 0.7;
+        const trace = dataSources.find(ds => ds.traceTileSelection)?.traceTileSelection;
         const prevSubdivided = this.m_prevSubdivided;
         const curSubdivided = new Set<number>();
 
@@ -228,6 +230,7 @@ export class FrustumIntersection {
                 ds.shouldSubdivide(zoomLevels[i], tileKey)
             );
             if (!subdivide) {
+                trace?.(tileKey, "source zoom or coverage limit");
                 continue;
             }
 
@@ -241,6 +244,7 @@ export class FrustumIntersection {
                     ? targetTileArea * LOD_HYSTERESIS
                     : targetTileArea;
                 if (tileEntry.area < threshold) {
+                    trace?.(tileKey, "projected area below split threshold", tileEntry.area, threshold);
                     continue;
                 }
             }
@@ -285,6 +289,8 @@ export class FrustumIntersection {
                     }
 
                     workList.push(subTileEntry);
+                } else {
+                    trace?.(subTileKey, "outside frustum or zero projected area");
                 }
             }
         }
@@ -321,7 +327,11 @@ export class FrustumIntersection {
         geoBox.northEast.altitude = (geoBox.northEast.altitude ?? 0) + maxGeometryHeight;
 
         this.mapView.projection.projectBox(geoBox, cache.tileBounds);
-        const { area, distance } = this.computeTileAreaAndDistance(cache.tileBounds);
+        // At levels 0–2 the globe OBB uses world axes. Smaller globe tiles
+        // have a tangent frame in which Z is vertical.
+        const lodHeightPadding = this.m_useTerrainFootprintLod && tileKey.level >= 3 &&
+            this.projection.type === ProjectionType.Spherical ? maxGeometryHeight - minGeometryHeight : 0;
+        const { area, distance } = this.computeTileAreaAndDistance(cache.tileBounds, lodHeightPadding);
 
         if (area > 0) {
             return new TileKeyEntry(
@@ -345,7 +355,8 @@ export class FrustumIntersection {
      * @return Area estimate and distance to tile center in clip space
      */
     private computeTileAreaAndDistance(
-        tileBounds: THREE.Box3 | OrientedBox3
+        tileBounds: THREE.Box3 | OrientedBox3,
+        lodHeightPadding: number
     ): { area: number; distance: number } {
         if (tileBounds instanceof THREE.Box3) {
             if (
@@ -374,6 +385,13 @@ export class FrustumIntersection {
         // Estimate objects screen space size with diagonal of bounds
         // Dividing by w projects object size to screen space
         const size = tileBounds.getSize(tmpVectors3[1]);
+        if (lodHeightPadding > 0) {
+            // A 9 km safety envelope is appropriate for culling an unknown
+            // ridge, even on a 1 km ocean tile. For LOD, retain actual relief
+            // and allow up to one horizontal tile width of unknown relief.
+            const retainedRelief = Math.max(size.z - lodHeightPadding, Math.min(size.x, size.y));
+            size.z = Math.min(size.z, retainedRelief);
+        }
         const objectSize = (0.5 * size.length()) / projectedPoint.w;
 
         return {

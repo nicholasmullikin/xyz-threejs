@@ -22,6 +22,7 @@
     },
     "license": "Apache-2.0",
     "devDependencies": {
+        "@mapbox/martini": "0.2.0",
         "@mapbox/vector-tile": "2.0.4",
         "@types/dat.gui": "^0.7.1",
         "@types/long": "^4.0.1",
@@ -51,6 +52,7 @@
         "html-webpack-plugin": "^5.5.3",
         "ncp": "^2.0.0",
         "pbf": "4.0.1",
+        "pmtiles": "4.5.0",
         "stats.js": "^0.17.0",
         "style-loader": "^2.0.0",
         "suncalc": "^1.8.0",
@@ -71,8 +73,11 @@
         "access": "public"
     },
     "dependencies": {
+        "3d-tiles-renderer": "0.3.43",
         "@turf/turf": "^6.5.0",
-        "@xyzmaps/harp-terrain-datasource": "../harp-terrain-datasource"
+        "@xyzmaps/harp-terrain-datasource": "../harp-terrain-datasource",
+        "laz-perf": "0.0.7",
+        "lerc": "3.0.0"
     },
     "private": true
 }

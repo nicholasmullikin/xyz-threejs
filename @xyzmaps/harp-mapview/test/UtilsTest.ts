@@ -87,6 +87,44 @@ describe("MapViewUtils", function () {
             // Make sure the target did not move.
             expect(worldTarget.distanceTo(newWorldTarget)).to.be.closeTo(0, Number.EPSILON);
         });
+        it("preserves the picked point and zoom distance on a terrain slope", function () {
+            const camera = new THREE.PerspectiveCamera(40, 1.4);
+            const location = new GeoCoordinates(45, 12, 1500);
+            const target = sphereProjection.projectPoint(location, new THREE.Vector3());
+            setCamera(camera, sphereProjection, location, 0, 45, 8000);
+            const up = target.clone().normalize();
+            const east = new THREE.Vector3(0, 0, 1).cross(up).normalize();
+            const north = up.clone().cross(east);
+            const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+                up.addScaledVector(north, 0.3).normalize(),
+                target
+            );
+            const raycaster = new THREE.Raycaster();
+            function pick(x: number, y: number) {
+                raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+                return raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+            }
+            const map = ({
+                ...mapViewMock,
+                camera,
+                projection: sphereProjection,
+                canvas: { clientWidth: 1000, clientHeight: 700 },
+                elevationProvider: {
+                    getCameraTarget: () => pick(0, 0),
+                    rayCast: (x: number, y: number) => pick(x / 500 - 1, 1 - y / 350)
+                }
+            } as unknown) as MapView;
+            const anchor = pick(0.6, -0.45)!;
+            for (const distance of [4000, 64000, 8000]) {
+                const zoom = MapViewUtils.calculateZoomLevelFromDistance(map, distance);
+                MapViewUtils.zoomOnTargetPosition(map, 0.6, -0.45, zoom);
+                expect(camera.position.distanceTo(pick(0, 0)!)).to.be.closeTo(distance, 1e-5);
+                const cursor = anchor.clone().project(camera);
+                expect(cursor.x).to.be.closeTo(0.6, EPS);
+                expect(cursor.y).to.be.closeTo(-0.45, EPS);
+            }
+        });
+
         it("only changes zoom on center even when tilting", () => {
             const geoTarget = new GeoCoordinates(52.5, 13.5);
             const worldTarget = mapView.projection.projectPoint(geoTarget, new THREE.Vector3());

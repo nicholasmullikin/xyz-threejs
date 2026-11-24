@@ -207,7 +207,8 @@ export class MapRenderingManager implements IMapRenderingManager {
         width: number,
         height: number,
         lowResPixelRatio: number | undefined,
-        antialiasSettings: IMapAntialiasSettings | undefined = { msaaEnabled: false }
+        antialiasSettings: IMapAntialiasSettings | undefined = { msaaEnabled: false },
+        sharpenDynamicRendering = false
     ) {
         this.m_readBuffer = new THREE.WebGLRenderTarget(width, height);
         this.m_msaaPass = new MSAARenderPass();
@@ -221,7 +222,7 @@ export class MapRenderingManager implements IMapRenderingManager {
             antialiasSettings.staticMsaaSamplingLevel === undefined
                 ? DEFAULT_STATIC_MSAA_SAMPLING_LEVEL
                 : antialiasSettings.staticMsaaSamplingLevel;
-        this.m_lowResPass = new LowResRenderPass(lowResPixelRatio);
+        this.m_lowResPass = new LowResRenderPass(lowResPixelRatio, sharpenDynamicRendering);
         this.m_lowResPass.enabled = lowResPixelRatio !== undefined;
     }
 

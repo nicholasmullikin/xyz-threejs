@@ -7,7 +7,7 @@
 import { GradientSky, Light, Sky } from "@xyzmaps/harp-datasource-protocol";
 import { ProjectionType, Vector3Like } from "@xyzmaps/harp-geoutils";
 import { getOptionValue, LoggerManager } from "@xyzmaps/harp-utils";
-import THREE = require("three");
+import * as THREE from "three";
 
 import { BackgroundDataSource } from "./BackgroundDataSource";
 import { MapView, MapViewOptions } from "./MapView";

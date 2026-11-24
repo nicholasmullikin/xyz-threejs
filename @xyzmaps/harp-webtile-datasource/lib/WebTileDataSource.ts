@@ -7,7 +7,7 @@
 import { TileKey, TilingScheme, webMercatorTilingScheme } from "@xyzmaps/harp-geoutils";
 import { CopyrightInfo, DataSource, DataSourceOptions, Tile } from "@xyzmaps/harp-mapview";
 import { getOptionValue } from "@xyzmaps/harp-utils";
-import THREE = require("three");
+import * as THREE from "three";
 import { WebTileLoader } from "./WebTileLoader";
 
 /**

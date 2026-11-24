@@ -38,6 +38,9 @@ export interface ElevationProvider {
      */
     rayCast(x: number, y: number): THREE.Vector3 | undefined;
 
+    /** Closest visible terrain on the camera center ray, if the provider supports mesh picking. */
+    getCameraTarget?(camera: THREE.Camera): THREE.Vector3 | undefined;
+
     /**
      * Get the displacement map for a given tile key. If the displacement map for the given tileKey
      * is not in the cache a lower level tile will be returned.

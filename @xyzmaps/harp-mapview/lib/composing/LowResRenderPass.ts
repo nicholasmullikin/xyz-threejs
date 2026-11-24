@@ -30,7 +30,7 @@ export class LowResRenderPass extends Pass {
 
     private readonly m_quadScene: THREE.Scene = new THREE.Scene();
     private readonly m_quadUniforms: { [uniformName: string]: THREE.IUniform } =
-        CopyShader.uniforms;
+        THREE.UniformsUtils.clone(CopyShader.uniforms);
 
     private readonly m_quadMaterial: THREE.ShaderMaterial = new CopyMaterial(this.m_quadUniforms);
     private readonly m_quad: THREE.Mesh = new THREE.Mesh(
@@ -51,8 +51,28 @@ export class LowResRenderPass extends Pass {
      * good results. A value of `undefined` disables the low res render pass. The value should not
      * be larger than`window.devicePixelRatio`.
      */
-    constructor(public lowResPixelRatio?: number) {
+    constructor(public lowResPixelRatio?: number, sharpen = false) {
         super();
+        if (sharpen) {
+            this.m_quadUniforms.sourceTexel = { value: new THREE.Vector2() };
+            this.m_quadMaterial.fragmentShader = `
+                uniform sampler2D tDiffuse;
+                uniform vec2 sourceTexel;
+                varying vec2 vUv;
+                void main() {
+                    vec4 center = texture2D(tDiffuse, vUv);
+                    vec2 dx = vec2(sourceTexel.x, 0.), dy = vec2(0., sourceTexel.y);
+                    vec3 left = texture2D(tDiffuse, vUv - dx).rgb;
+                    vec3 right = texture2D(tDiffuse, vUv + dx).rgb;
+                    vec3 below = texture2D(tDiffuse, vUv - dy).rgb;
+                    vec3 above = texture2D(tDiffuse, vUv + dy).rgb;
+                    vec3 sharpened = center.rgb + .28 * (4. * center.rgb - left - right - below - above);
+                    // Restrict reconstruction to this neighborhood's color range.
+                    vec3 lo = min(min(left, right), min(above, below));
+                    vec3 hi = max(max(left, right), max(above, below));
+                    gl_FragColor = vec4(clamp(sharpened, min(lo, center.rgb), max(hi, center.rgb)), center.a);
+                }`;
+        }
         this.m_quad.frustumCulled = false;
         this.m_quadScene.add(this.m_quad);
         this.m_pixelRatio = lowResPixelRatio;
@@ -137,9 +157,11 @@ export class LowResRenderPass extends Pass {
 
         this.m_quadUniforms.tDiffuse.value = this.m_renderTarget.texture;
         this.m_quadUniforms.opacity.value = 1.0;
+        this.m_quadUniforms.sourceTexel?.value.set(1 / this.m_renderTarget.width, 1 / this.m_renderTarget.height);
 
         const oldRenderTarget = renderer.getRenderTarget();
         renderer.setRenderTarget(this.m_renderTarget);
+        renderer.state.buffers.stencil.setMask(0xff);
         renderer.clear();
         // Render into the low resolution internal render target.
         renderer.render(scene, camera);
@@ -147,6 +169,7 @@ export class LowResRenderPass extends Pass {
         // Render the low resolution target into the screen.
         // NOTE: three.js doesn't like undefined as renderTarget, but works with `null`
         renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+        renderer.state.buffers.stencil.setMask(0xff);
         renderer.clear();
         renderer.render(this.m_quadScene, this.m_localCamera);
         renderer.setRenderTarget(oldRenderTarget);

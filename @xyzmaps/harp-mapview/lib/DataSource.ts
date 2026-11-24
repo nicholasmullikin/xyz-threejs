@@ -10,6 +10,7 @@ import { Projection, TileKey, TilingScheme } from "@xyzmaps/harp-geoutils";
 import { assert, LoggerManager } from "@xyzmaps/harp-utils";
 import * as THREE from "three";
 
+import type { TileKeyEntry } from "./FrustumIntersection";
 import { MapView } from "./MapView";
 import { Tile } from "./Tile";
 
@@ -120,6 +121,33 @@ export interface DataSourceOptions {
  * Derive a class from `DataSource` to contribute data and geometries to the {@link MapView}.
  */
 export abstract class DataSource extends THREE.EventDispatcher {
+    /**
+     * Opt in when shouldSubdivide and canGetTile depend only on the camera,
+     * target, tiling scheme and zoom. Increment this revision when other
+     * selection inputs change. Tile loading and fallback still run each frame.
+     */
+    stationaryTileSelectionRevision?: number;
+
+    /** Cull individual meshes after tile selection when their bounds include shader displacement. */
+    readonly enableObjectFrustumCulling: boolean = false;
+
+    /** Optional diagnostic sink for quadtree termination decisions. */
+    traceTileSelection?: (key: TileKey, reason: string, area?: number, threshold?: number) => void;
+    /** Allow hierarchical sources to preserve coverage when the visible tile budget is exceeded. */
+    selectBudgetedTiles?(nearestFirst: TileKeyEntry[], limit: number): TileKeyEntry[];
+
+    /** Choose intermediate requests and a nonoverlapping render cover for a hierarchical source. */
+    planTileRequests?(
+        desired: TileKeyEntry[],
+        state: (key: TileKey, offset: number) => "ready" | "pending" | undefined,
+        previous: Iterable<Tile>
+    ): {
+        requests: TileKeyEntry[];
+        rendered: Array<{ tileKey: TileKey; offset: number }>;
+        retain: TileKeyEntry[];
+        complete: boolean;
+    };
+
     /**
      * Keep the update event here to avoid a global reference to the datasource (and thus prevent garbage collection).
      */

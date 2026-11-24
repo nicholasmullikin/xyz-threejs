@@ -51,5 +51,16 @@ module.exports = `
 #earth-credits{position:absolute;bottom:4px;right:8px;z-index:51;max-width:min(340px,calc(100% - 16px));background:#12191ee8;color:#aab7bf;font:10px/1.5 system-ui;padding:3px 7px;border-radius:4px}
 #earth-credits summary{cursor:pointer;list-style:none}#earth-credits a{color:#c0e6ce}#earth-credits[open]{padding:10px 12px}#earth-credits[open] summary{margin-bottom:8px}
 @media(max-width:480px){#earth-controls .earth-bar{top:10px;left:10px;gap:0}#earth-controls .earth-bar button{padding:8px 10px}#earth-controls .earth-home span{display:none}#earth-controls .earth-fullscreen{top:10px;right:10px;width:42px;height:46px}#earth-controls .earth-drawer{top:72px;left:10px;width:min(304px,calc(100% - 72px));max-height:calc(100% - 104px)}#earth-navigation{right:10px!important}#earth-controls section{padding:14px}#earth-controls .earth-heading{padding:12px 14px 8px}}
+
+#earth-controls .earth-compare{position:absolute;top:12px;left:10px;max-width:calc(100% - 74px);display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 9px;background:var(--surface);border-radius:10px;pointer-events:auto;z-index:2}
+#earth-controls .earth-compare label{margin:0}
+#earth-controls .earth-compare select{width:auto;min-width:0;max-width:100%;flex:1}
+#earth-controls .earth-compare a{color:var(--accent);font-size:12px}
+#earth-controls .earth-compare-surface{position:absolute;inset:0;pointer-events:auto;background:#172027;z-index:1}
+#earth-controls .earth-compare-surface img,#earth-controls .earth-compare-live{width:100%;height:100%;object-fit:contain;display:block}
+#earth-controls .earth-reference-credit,#earth-controls .earth-compare-message:not(:empty){position:absolute;bottom:6px;left:8px;color:white;background:#192126;padding:3px 7px}
+#earth-controls .earth-fullscreen{z-index:3}
+body:has(.earth-show-reference) #earth-credits,body:has(.earth-show-reference) #earth-navigation{display:none}
+@media(max-width:550px){#earth-controls .earth-bar button{gap:3px;padding:6px}#earth-controls .earth-home span{display:none}#earth-controls .earth-compare select{max-width:calc(100% - 42px)}}
 @media(prefers-reduced-motion:reduce){#earth-controls .earth-switch::after{transition:none}}
 `;

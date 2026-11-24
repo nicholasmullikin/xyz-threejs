@@ -1,129 +1,261 @@
 /* Terrain boundary constraints for the vendored harp demo. Apache-2.0. */
 
-function create(THREE, dataSource) {
-    const originals = new WeakMap();
-    const skirts = new WeakMap();
-    let previous = "";
+// Keep the border graph between frames. A joining or leaving tile invalidates its
+// edges and any finer samples that interpolate those edges, including T junctions.
+function createTopology(worldWidth) {
+    const active = new Set(),
+        nodes = new Map();
+    const columns = new Map(),
+        rows = new Map();
+    function line(lines, coordinate) {
+        if (!lines.has(coordinate)) lines.set(coordinate, { edges: new Set(), nodes: new Set() });
+        return lines.get(coordinate);
+    }
+    function update(next) {
+        const dirty = new Set(),
+            edgesChanged = [];
+        for (const t of active) {
+            if (next.has(t)) continue;
+            for (const ref of t.refs) {
+                ref.node.refs.delete(ref);
+                dirty.add(ref.node);
+            }
+            for (const edge of t.edges) {
+                edge.line.edges.delete(edge);
+                edgesChanged.push(edge);
+            }
+            t.refs = t.edges = t.nodes = undefined;
+            active.delete(t);
+        }
+        for (const t of next) {
+            if (active.has(t)) continue;
+            active.add(t);
+            const n = t.width - 1,
+                scale = worldWidth / t.density;
+            t.nodes = new Map();
+            t.refs = t.perimeter.map((i, j) => {
+                const logical = t.logicalPerimeter[j],
+                    col = logical % t.width,
+                    row = Math.floor(logical / t.width);
+                const x = ((t.x * n + col) * scale) % worldWidth,
+                    y = (t.y * n + row) * scale;
+                const key = x + "," + y;
+                let node = nodes.get(key);
+                if (!node) {
+                    node = { key, x, y, refs: new Set(), density: Infinity };
+                    nodes.set(key, node);
+                    line(columns, x).nodes.add(node);
+                    line(rows, y).nodes.add(node);
+                }
+                const ref = { t, i, j, node };
+                node.refs.add(ref);
+                t.nodes.set(logical, node);
+                dirty.add(node);
+                return ref;
+            });
+            const x0 = t.x * n * scale,
+                x1 = (t.x + 1) * n * scale;
+            const y0 = t.y * n * scale,
+                y1 = (t.y + 1) * n * scale;
+            // Edges survive this update. Store integer layout, so each live edge
+            // cannot retain the update frame and all its departed tiles.
+            const edge = (vertical, at, start, end, offset, stride) => {
+                const edgeLine = line(vertical ? columns : rows, at);
+                const e = { vertical, line: edgeLine, start, end, tile: t, offset, stride };
+                edgeLine.edges.add(e);
+                edgesChanged.push(e);
+                return e;
+            };
+            t.edges = [
+                edge(true, x0, y0, y1, 0, t.width),
+                edge(true, x1 % worldWidth, y0, y1, n, t.width),
+                edge(false, y0, x0, x1, 0, 1),
+                edge(false, y1, x0, x1, n * t.width, 1)
+            ];
+        }
+        // A finer tile may have vertices inside this edge that were never
+        // vertices of the arriving/departing tile itself.
+        for (const edge of edgesChanged)
+            for (const node of edge.line.nodes) {
+                const at = edge.vertical ? node.y : node.x;
+                if (
+                    (at >= edge.start && at <= edge.end) ||
+                    (!edge.vertical && at === 0 && edge.end === worldWidth)
+                )
+                    dirty.add(node);
+            }
+        for (const node of dirty) {
+            if (node.constraint) {
+                const [a, b] = node.constraint;
+                a.dependents.delete(node);
+                b.dependents.delete(node);
+                node.constraint = undefined;
+            }
+            if (node.refs.size === 0) {
+                nodes.delete(node.key);
+                const col = columns.get(node.x),
+                    row = rows.get(node.y);
+                col.nodes.delete(node);
+                row.nodes.delete(node);
+                if (col.nodes.size === 0 && col.edges.size === 0) columns.delete(node.x);
+                if (row.nodes.size === 0 && row.edges.size === 0) rows.delete(node.y);
+                dirty.delete(node);
+                continue;
+            }
+            node.density = Infinity;
+            for (const { t } of node.refs) node.density = Math.min(node.density, t.density);
+            let coarse, p;
+            const consider = (edges, at) => {
+                for (const e of edges) {
+                    if (
+                        e.tile.density >= node.density ||
+                        (coarse && coarse.tile.density <= e.tile.density) ||
+                        at < e.start ||
+                        at > e.end
+                    )
+                        continue;
+                    coarse = e;
+                    p = at;
+                }
+            };
+            consider(columns.get(node.x).edges, node.y);
+            const horizontal = rows.get(node.y).edges;
+            consider(horizontal, node.x);
+            if (node.x === 0) consider(horizontal, worldWidth);
+            if (coarse) {
+                const n = coarse.tile.width - 1;
+                const u = ((p - coarse.start) / (coarse.end - coarse.start)) * n;
+                const lo = Math.floor(u);
+                const a = coarse.tile.nodes.get(coarse.offset + lo * coarse.stride);
+                const b = coarse.tile.nodes.get(
+                    coarse.offset + Math.min(n, lo + 1) * coarse.stride
+                );
+                node.constraint = [a, b, u - lo];
+                (a.dependents ??= new Set()).add(node);
+                (b.dependents ??= new Set()).add(node);
+            }
+        }
+        return dirty;
+    }
+    function clear() {
+        for (const t of active) t.nodes = t.refs = t.edges = undefined;
+        active.clear();
+    }
+    return { active, update, clear, worldWidth };
+}
+
+function invalidate(dirty, field) {
+    // Set iteration visits entries appended during traversal.
+    for (const node of dirty) {
+        node[field] = undefined;
+        if (node.dependents) for (const child of node.dependents) dirty.add(child);
+    }
+}
+
+const { surfaceNormals, boundaryFaces, refreshBoundaryNormals } = require("./terrain-normals");
+const { perimeterIndices, gridWidth, prepareTerrainGrid } = require("./terrain-grid");
+
+function create(THREE, dataSource, transition) {
+    const records = new WeakMap();
+    let topology;
     return function reconcile(entries) {
         const entry = entries.find(e => e.dataSource === dataSource);
         if (!entry) {
-            previous = "";
+            transition?.([], false);
+            topology?.clear();
+            topology = undefined;
             return;
         }
         const tiles = [];
         for (const tile of entry.renderedTiles.values()) {
             for (const mesh of tile.objects) {
                 if (!mesh.isMesh) continue;
-                const geometry = mesh.geometry,
+                const geometry = mesh.geometry;
+                let position = geometry.attributes.position;
+                let t = records.get(geometry);
+                if (!t || t.mesh !== mesh || t.position !== position) {
+                    const width =
+                        geometry.userData?.attributeMetadata?.position?.terrainEdgeWidth ??
+                        gridWidth(geometry);
+                    if (!Number.isInteger(width) || width < 2) continue;
+                    const matrix = tile.localTangentSpace
+                        ? tile.boundingBox.getRotationMatrix().clone()
+                        : new THREE.Matrix4();
+                    matrix.setPosition(tile.center);
+                    const n = width - 1;
+                    const logicalPerimeter = perimeterIndices(width);
+                    const surfaceCount =
+                        geometry.userData?.attributeMetadata?.position?.terrainSurfaceCount;
+                    const perimeter = surfaceCount
+                        ? logicalPerimeter.map((_, j) => j)
+                        : logicalPerimeter;
+                    prepareTerrainGrid(THREE, geometry, width, perimeter);
                     position = geometry.attributes.position;
-                const width = Math.sqrt(position.count);
-                // Skirts are children, so they inherit the terrain's camera-relative transform.
-                const existingSkirt = skirts.get(geometry);
-                if (existingSkirt) existingSkirt.material = mesh.material;
-                if (!Number.isInteger(width) || width < 2) continue;
-                let original = originals.get(position);
-                if (!original) {
-                    original = position.array.slice();
-                    originals.set(position, original);
+                    // Only border vertices are stitched. Keep their decoded world positions
+                    // and raw surface normals so repeated exchanges never accumulate edits.
+                    const original = new Float64Array(perimeter.length * 3);
+                    const vector = new THREE.Vector3();
+                    perimeter.forEach((idx, j) => {
+                        vector
+                            .fromBufferAttribute(position, idx)
+                            .applyMatrix4(matrix)
+                            .toArray(original, j * 3);
+                    });
+                    t = {
+                        mesh,
+                        tile,
+                        geometry,
+                        position,
+                        width,
+                        matrix,
+                        original,
+                        perimeter,
+                        logicalPerimeter,
+                        surfaceCount: surfaceCount ?? width * width,
+                        surfaceNormals: new Float64Array(original.length),
+                        inverse: matrix.clone().invert(),
+                        inverseRotation: new THREE.Matrix3().setFromMatrix4(
+                            matrix.clone().invert()
+                        ),
+                        z: tile.tileKey.level,
+                        density: n * 2 ** tile.tileKey.level,
+                        x: tile.tileKey.column,
+                        y: tile.tileKey.row
+                    };
+                    records.set(geometry, t);
                 }
-                const matrix = tile.localTangentSpace
-                    ? tile.boundingBox.getRotationMatrix().clone()
-                    : new THREE.Matrix4();
-                matrix.setPosition(tile.center);
-                tiles.push({
-                    tile,
-                    mesh,
-                    geometry,
-                    position,
-                    original,
-                    width,
-                    matrix,
-                    inverse: matrix.clone().invert(),
-                    z: tile.tileKey.level,
-                    x: tile.tileKey.column,
-                    y: tile.tileKey.row
-                });
+                tiles.push(t);
             }
         }
-        const signature = tiles
-            .map(t => `${t.mesh.uuid}/${t.geometry.uuid}`)
-            .sort()
-            .join(";");
-        if (signature === previous) return;
-        previous = signature;
-        if (!tiles.length) return;
-        const maxLevel = Math.max(...tiles.map(t => t.z));
-        const worldWidth = (tiles[0].width - 1) * 2 ** maxLevel;
-        const nodes = new Map(),
-            vertical = new Map(),
-            horizontal = new Map();
-        const vector = new THREE.Vector3();
-        const key = (x, y) => `${x},${y}`;
-        const addEdge = (map, axis, start, end, tile, indices) => {
-            if (!map.has(axis)) map.set(axis, []);
-            map.get(axis).push({ start, end, tile, indices });
-        };
+        if (!tiles.length) {
+            transition?.(tiles, false);
+            topology?.clear();
+            topology = undefined;
+            return;
+        }
+        if (
+            topology &&
+            tiles.length === topology.active.size &&
+            tiles.every(t => topology.active.has(t))
+        ) {
+            transition?.(tiles, true);
+            return;
+        }
+        // Keep a common integer lattice for mixed resolutions and all quadtree levels.
+        if (!topology || tiles.some(t => topology.worldWidth % t.density !== 0)) {
+            const maxLevel = Math.max(...tiles.map(t => t.z));
+            const worldWidth = Math.max(...tiles.map(t => t.width - 1)) * 2 ** maxLevel;
+            topology?.clear();
+            topology = createTopology(worldWidth);
+        }
         for (const t of tiles) {
-            // Always start from decoded geometry, never accumulate rounding or LOD edits.
-            t.position.array.set(t.original);
-            const n = t.width - 1,
-                scale = 2 ** (maxLevel - t.z);
-            t.nodes = new Map();
-            const add = (col, row) => {
-                const i = row * t.width + col;
-                if (t.nodes.has(i)) return;
-                const x = ((t.x * n + col) * scale) % worldWidth,
-                    y = (t.y * n + row) * scale;
-                const k = key(x, y);
-                if (!nodes.has(k)) nodes.set(k, { x, y, refs: [], level: Infinity });
-                const node = nodes.get(k);
-                node.refs.push({ t, i });
-                node.level = Math.min(node.level, t.z);
-                t.nodes.set(i, node);
-            };
-            for (let i = 0; i <= n; i++) {
-                add(i, 0);
-                add(i, n);
-                add(0, i);
-                add(n, i);
-            }
-            const x0 = t.x * n * scale,
-                x1 = (t.x + 1) * n * scale;
-            const y0 = t.y * n * scale,
-                y1 = (t.y + 1) * n * scale;
-            addEdge(vertical, x0, y0, y1, t, i => i * t.width);
-            addEdge(vertical, x1 % worldWidth, y0, y1, t, i => i * t.width + n);
-            addEdge(horizontal, y0, x0, x1, t, i => i);
-            addEdge(horizontal, y1, x0, x1, t, i => n * t.width + i);
+            t.seamChanged = false;
+            t.surfaceChanged = !t.prepared;
+            t.normalChanged = !t.prepared;
         }
-        // Integer tile-grid coordinates identify a corner once, including T junctions.
-        // Constraints always point to a coarser level, so resolution is acyclic.
-        for (const node of nodes.values()) {
-            const candidates = [
-                ...(vertical.get(node.x) || []).map(e => [e, node.y]),
-                ...(horizontal.get(node.y) || []).flatMap(e =>
-                    node.x === 0
-                        ? [
-                              [e, 0],
-                              [e, worldWidth]
-                          ]
-                        : [[e, node.x]]
-                )
-            ]
-                .filter(([e, p]) => e.tile.z < node.level && p >= e.start && p <= e.end)
-                .sort((a, b) => a[0].tile.z - b[0].tile.z);
-            if (candidates.length) {
-                const [e, p] = candidates[0],
-                    n = e.tile.width - 1;
-                const u = ((p - e.start) / (e.end - e.start)) * n,
-                    lo = Math.floor(u);
-                node.constraint = [
-                    e.tile.nodes.get(e.indices(lo)),
-                    e.tile.nodes.get(e.indices(Math.min(lo + 1, n))),
-                    u - lo
-                ];
-            }
-        }
+        const dirty = topology.update(new Set(tiles));
+        invalidate(dirty, "world");
+        const vector = new THREE.Vector3();
         function resolve(node, field, read) {
             if (node[field]) return node[field];
             let value;
@@ -136,7 +268,7 @@ function create(THREE, dataSource) {
                 value = new THREE.Vector3();
                 let count = 0;
                 for (const ref of node.refs)
-                    if (ref.t.z === node.level) {
+                    if (ref.t.density === node.density) {
                         value.add(read(ref));
                         count++;
                     }
@@ -148,94 +280,104 @@ function create(THREE, dataSource) {
             node[field] = value;
             return value;
         }
-        for (const node of nodes.values()) {
-            const value = resolve(node, "world", ({ t, i }) =>
-                vector.fromBufferAttribute(t.position, i).applyMatrix4(t.matrix)
-            );
+        const differs = (attribute, i, v) =>
+            Math.fround(v.x) !== attribute.getX(i) ||
+            Math.fround(v.y) !== attribute.getY(i) ||
+            Math.fround(v.z) !== attribute.getZ(i);
+        for (const node of dirty) {
+            const value = resolve(node, "world", ({ t, j }) => vector.fromArray(t.original, 3 * j));
             for (const { t, i } of node.refs) {
                 vector.copy(value).applyMatrix4(t.inverse);
-                t.position.setXYZ(i, vector.x, vector.y, vector.z);
+                if (differs(t.position, i, vector)) {
+                    t.position.setXYZ(i, vector.x, vector.y, vector.z);
+                    t.seamChanged = t.surfaceChanged = true;
+                }
             }
         }
+        const dirtyNormals = new Set(dirty);
         for (const t of tiles) {
+            if (!t.surfaceChanged) continue;
             t.position.needsUpdate = true;
-            t.geometry.computeVertexNormals();
-            t.geometry.computeBoundingSphere();
-            t.geometry.computeBoundingBox();
-        }
-        // Resolve all normals before writing any, to avoid traversal-order bias.
-        for (const node of nodes.values())
-            resolve(node, "normal", ({ t, i }) =>
-                vector
-                    .fromBufferAttribute(t.geometry.attributes.normal, i)
-                    .transformDirection(t.matrix)
-            );
-        for (const node of nodes.values())
-            for (const { t, i } of node.refs) {
-                // Rotation only (no translation); preserve the interpolated vector length.
-                const rotation = new THREE.Matrix3().setFromMatrix4(t.inverse);
-                vector.copy(node.normal).applyMatrix3(rotation);
-                t.geometry.attributes.normal.setXYZ(i, vector.x, vector.y, vector.z);
-                t.geometry.attributes.normal.needsUpdate = true;
+            const index = t.geometry.index.array;
+            const end = index.length - 12 * t.perimeter.length;
+            let normal = t.geometry.attributes.normal;
+            if (
+                !t.prepared &&
+                !t.geometry.userData.attributeMetadata?.position?.terrainSurfaceNormals
+            ) {
+                const values = surfaceNormals(
+                    t.position.array,
+                    index,
+                    t.surfaceCount,
+                    end,
+                    normal?.array
+                );
+                if (!normal) {
+                    normal = new THREE.BufferAttribute(values, 3);
+                    t.geometry.setAttribute("normal", normal);
+                }
+            } else if (t.seamChanged) {
+                t.normalPlan ??= boundaryFaces(index, t.surfaceCount, end, t.perimeter);
+                refreshBoundaryNormals(t.position.array, index, normal.array, t.normalPlan);
             }
+            t.normalChanged = true;
+            t.perimeter.forEach((i, j) => {
+                vector
+                    .fromBufferAttribute(normal, i)
+                    .transformDirection(t.matrix)
+                    .toArray(t.surfaceNormals, j * 3);
+                dirtyNormals.add(t.nodes.get(t.logicalPerimeter[j]));
+            });
+        }
+        invalidate(dirtyNormals, "normal");
+        for (const node of dirtyNormals) {
+            const value = resolve(node, "normal", ({ t, j }) =>
+                vector.fromArray(t.surfaceNormals, 3 * j)
+            );
+            for (const { t, i } of node.refs) {
+                vector.copy(value).applyMatrix3(t.inverseRotation);
+                const normal = t.geometry.attributes.normal;
+                const changed = normal.normalized
+                    ? Math.round(32767 * vector.x) !== normal.array[3 * i] ||
+                      Math.round(32767 * vector.y) !== normal.array[3 * i + 1] ||
+                      Math.round(32767 * vector.z) !== normal.array[3 * i + 2]
+                    : differs(normal, i, vector);
+                if (changed) {
+                    normal.setXYZ(i, vector.x, vector.y, vector.z);
+                    t.normalChanged = true;
+                }
+            }
+        }
         // A short radial skirt covers subpixel cracks from Float32 roundoff and
         // T-junction rasterization. It is not used to hide mismatched elevations.
         for (const t of tiles) {
-            let skirt = skirts.get(t.geometry);
-            const n = t.width - 1;
-            const perimeter = [];
-            for (let i = 0; i < n; i++) perimeter.push(i);
-            for (let i = 0; i < n; i++) perimeter.push(i * t.width + n);
-            for (let i = n; i > 0; i--) perimeter.push(n * t.width + i);
-            for (let i = n; i > 0; i--) perimeter.push(i * t.width);
-            const count = perimeter.length;
-            if (!skirt) {
-                const geometry = new THREE.BufferGeometry();
-                geometry.setAttribute(
-                    "position",
-                    new THREE.Float32BufferAttribute(new Float32Array(count * 6), 3)
-                );
-                geometry.setAttribute(
-                    "normal",
-                    new THREE.Float32BufferAttribute(new Float32Array(count * 6), 3)
-                );
-                geometry.setAttribute(
-                    "uv",
-                    new THREE.Float32BufferAttribute(new Float32Array(count * 4), 2)
-                );
-                const indices = [];
-                for (let i = 0; i < count; i++) {
-                    const j = (i + 1) % count,
-                        a = i * 2,
-                        b = j * 2,
-                        c = a + 1,
-                        d = b + 1;
-                    // Both windings, using the parent's material and culling mode.
-                    indices.push(a, b, c, b, d, c, c, b, a, c, d, b);
+            if (!t.surfaceChanged && !t.normalChanged) continue;
+            if (t.normalChanged) t.geometry.attributes.normal.needsUpdate = true;
+            const normal = t.geometry.attributes.normal;
+            const first = t.surfaceCount;
+            for (let j = 0; j < t.perimeter.length; j++) {
+                const i = t.perimeter[j],
+                    top = first + 2 * j;
+                if (t.surfaceChanged) {
+                    vector.fromBufferAttribute(t.position, i);
+                    t.position.setXYZ(top, vector.x, vector.y, vector.z);
+                    vector.applyMatrix4(t.matrix);
+                    vector.multiplyScalar(1 - 10 / (vector.length() || 1)).applyMatrix4(t.inverse);
+                    t.position.setXYZ(top + 1, vector.x, vector.y, vector.z);
                 }
-                geometry.setIndex(indices);
-                skirt = new THREE.Mesh(geometry, t.mesh.material);
-                skirt.frustumCulled = false;
-                t.mesh.add(skirt);
-                skirts.set(t.geometry, skirt);
+                vector.fromBufferAttribute(normal, i);
+                normal.setXYZ(top, vector.x, vector.y, vector.z);
+                normal.setXYZ(top + 1, vector.x, vector.y, vector.z);
             }
-            const attrs = skirt.geometry.attributes,
-                uv = t.geometry.attributes.uv;
-            for (let j = 0; j < count; j++) {
-                const i = perimeter[j];
-                vector.fromBufferAttribute(t.position, i);
-                attrs.position.setXYZ(j * 2, vector.x, vector.y, vector.z);
-                vector.applyMatrix4(t.matrix);
-                vector.addScaledVector(vector.clone().normalize(), -10).applyMatrix4(t.inverse);
-                attrs.position.setXYZ(j * 2 + 1, vector.x, vector.y, vector.z);
-                vector.fromBufferAttribute(t.geometry.attributes.normal, i);
-                for (let k = 0; k < 2; k++) {
-                    attrs.normal.setXYZ(j * 2 + k, vector.x, vector.y, vector.z);
-                    if (uv) attrs.uv.setXY(j * 2 + k, uv.getX(i), uv.getY(i));
-                }
+            if (t.surfaceChanged) {
+                // Terrain culls by its geographic tile bounds. The enclosing local
+                // sphere also covers the skirts and costs no second vertex scan.
+                t.geometry.computeBoundingBox();
+                t.geometry.boundingBox.getBoundingSphere(t.geometry.boundingSphere ??= new THREE.Sphere());
             }
-            for (const attr of Object.values(attrs)) attr.needsUpdate = true;
+            t.prepared = true;
         }
+        transition?.(tiles, false);
     };
 }
 

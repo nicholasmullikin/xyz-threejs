@@ -1,4 +1,21 @@
-function createControls({ map, setSunHour, environment, buildings, getSunHour, togglePlaying }) {
+function createControls({
+    map,
+    setSunHour,
+    environment,
+    buildings,
+    roads,
+    canopy,
+    survey,
+    lamps,
+    water,
+    shadows,
+    setOceanRelief,
+    source,
+    getSunHour,
+    togglePlaying,
+    setMode,
+    getMode
+}) {
     const style = document.createElement("style");
     style.textContent = require("./controls-style");
     document.head.appendChild(style);
@@ -107,6 +124,16 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
         element("small", b, "", description);
         b.setAttribute("aria-label", name);
     }
+    destination("Campus Point", "Santa Barbara, California", () => {
+        // The reference coordinates locate the eye, while harp lookAt takes a ground target.
+        map.setFovCalculation({ type: "fixed", fov: 35 });
+        map.lookAt({
+            target: { latitude: 34.40521, longitude: -119.84416, altitude: 0 },
+            distance: 475,
+            tilt: 79.2,
+            heading: 320.12
+        });
+    });
     destination("Canyon", "Arizona, USA", () => {
         setSunHour(14);
         map.lookAt({
@@ -189,7 +216,9 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
     slider.max = "24";
     slider.step = ".1";
     slider.setAttribute("aria-label", "Sun position over the day");
-    const localHour = hour => (((hour + (map.target.longitude + 112.15) / 15) % 24) + 24) % 24;
+    const { referenceLongitude } = require("./ephemeris");
+    const localHour = hour =>
+        (((hour + (map.target.longitude - referenceLongitude) / 15) % 24) + 24) % 24;
     const solarLabel = hour => {
         const minutes = Math.round(localHour(hour) * 60) % 1440;
         return (
@@ -205,7 +234,9 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
     }
     slider.oninput = () =>
         setSunHour(
-            (((Number(slider.value) + (-112.15 - map.target.longitude) / 15) % 24) + 24) % 24
+            (((Number(slider.value) + (referenceLongitude - map.target.longitude) / 15) % 24) +
+                24) %
+                24
         );
     const actions = element("div", sunSection, "earth-sun-actions");
     for (const [name, hour] of [
@@ -213,7 +244,7 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
         ["Night", 0]
     ])
         button(actions, name, () =>
-            setSunHour((((hour + (-112.15 - map.target.longitude) / 15) % 24) + 24) % 24)
+            setSunHour((((hour + (referenceLongitude - map.target.longitude) / 15) % 24) + 24) % 24)
         );
     const play = button(
         actions,
@@ -233,7 +264,7 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
     );
     play.setAttribute("aria-label", "Animate daylight cycle");
     play.setAttribute("aria-pressed", "false");
-    function toggle(parent, name, description, setter) {
+    function toggle(parent, name, description, setter, available = true) {
         const row = element("div", parent, "earth-row earth-switch-row"),
             copy = element("span", row);
         element("span", copy, "", name);
@@ -242,6 +273,8 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
         b.className = "earth-switch";
         b.setAttribute("aria-label", name);
         b.setAttribute("aria-pressed", "true");
+        b.disabled = !available;
+        if (!available) b.title = "Unavailable on this graphics device";
         function set(on) {
             b.setAttribute("aria-pressed", String(on));
             setter(on);
@@ -259,12 +292,14 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
     const cloudTypes = select(
         cloudFields,
         "Cloud type",
-        environment.cloudPresets.map(p => [
+        [["0","Historical coverage"],["forecast","NOAA forecast"], ...environment.cloudPresets.slice(1).map(p => [
             String(p.id),
-            p.id === 0 ? "Automatic weather" : p.name
-        ]),
+            p.name
+        ])],
         environment.setCloudPreset
     );
+    const forecastLabel = element("div", cloudFields, "earth-help");
+    forecastLabel.setAttribute("role","status");
     const quality = select(
         cloudFields,
         "Cloud quality",
@@ -276,10 +311,36 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
         environment.setCloudQuality
     );
     quality.value = "balanced";
+    const cloudParam=new URLSearchParams(location.search).get("cloud");
+    if(cloudParam==="off")setCloudEnabled(false);
+    else if(cloudParam!==null && environment.cloudPresets.some(p=>String(p.id)===cloudParam)){
+        cloudTypes.value=cloudParam;
+        environment.setCloudPreset(Number(cloudParam));
+        setCloudEnabled(true);
+    }
     const layers = section(settings, "On the ground");
+    toggle(layers, "Surveyed cities", "Measured city models where available", survey.setEnabled)(new URLSearchParams(location.search).get("survey")==="1");
+    toggle(layers, "Mapped architecture", "Roof forms, roof colors and facade materials recorded by OpenStreetMap contributors", buildings.setRoofShapes)(new URLSearchParams(location.search).get("roofs")==="1");
+    toggle(layers, "Sun shadows", "Nearby terrain and buildings cast shadows in daylight", shadows.setEnabled)(new URLSearchParams(location.search).get("shadows")==="1");
+    toggle(layers, "Tree canopy", "Measured canopy height and modeled trees at close range", canopy.setEnabled, canopy.stats.supported)(canopy.stats.supported && new URLSearchParams(location.search).get("canopy")==="1");
+    toggle(layers,"Water reflections","Sky and moonlight on mapped rivers, lakes and coastal water",water.setEnabled,water.stats.supported)(water.stats.supported && new URLSearchParams(location.search).get("water")!=="0");
+    toggle(layers, "Ocean floor", "Surveyed relief in regional and orbital views", setOceanRelief)(false);
     toggle(layers, "Lights", "City lights after sunset", environment.setLights);
     toggle(layers, "Buildings", "3D buildings at street scale", buildings.setEnabled);
-    element("div", settings, "earth-help", "Weather and daylight are simulated.");
+    toggle(layers,"Mapped street lights","OpenStreetMap lamp locations with simulated light after sunset",lamps.setEnabled,lamps.stats.supported)(new URLSearchParams(location.search).get("lamps")==="1");
+    toggle(layers, "Stylized night roads", "Illustrative highlights on mapped roads", roads.setEnabled, roads.stats.supported)(false);
+    element("div", settings, "earth-help", "Cloud shapes and daylight are simulated.");
+    const comparison = require("./comparison").createComparison({
+        map,
+        root,
+        bar,
+        button,
+        element,
+        setMode,
+        getMode,
+        getSunHour,
+        closePanel
+    });
     const fullscreen = button(
         root,
         "",
@@ -329,22 +390,59 @@ function createControls({ map, setSunHour, environment, buildings, getSunHour, t
         e.stopPropagation();
     });
     document.body.appendChild(root);
-    const refreshSun = () => updateSun(getSunHour());
+    const refreshSun = () => {
+        updateSun(getSunHour());
+        const label = environment.status.forecast || "";
+        if (forecastLabel.textContent !== label) forecastLabel.textContent = label;
+        forecastLabel.hidden = !label;
+    };
+    forecastLabel.hidden = true;
     map.addEventListener("didrender", refreshSun);
     updateSun(getSunHour());
     const credits = document.createElement("details");
     credits.id = "earth-credits";
     credits.innerHTML =
-        '<summary style="cursor:pointer">© OpenStreetMap · Mapbox · NASA</summary><div>Buildings: <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> / <a href="https://openmaptiles.org/" target="_blank" rel="noopener">© OpenMapTiles</a> / <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> (ODbL). Heights vary with available data.<br>Satellite / terrain: © Mapbox. Night lights: NASA Black Marble (2016). Clouds: procedural volumes with NASA Blue Marble coverage; simulated weather. Window lighting is illustrative. <a href="resources/earth/credits.html" target="_blank" rel="noopener">Sources</a></div>';
+        '<summary style="cursor:pointer">© OpenStreetMap · Mapbox · NASA</summary><div>Buildings: <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> / <a href="https://openmaptiles.org/" target="_blank" rel="noopener">© OpenMapTiles</a> / <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> (ODbL). Heights vary with available data.<br>Satellite / terrain: © Mapbox. Night lights: NASA Black Marble (2016). Clouds: procedural volumes with NASA Blue Marble or optional NOAA GFS global forecast coverage. Window lighting and optional road highlights are illustrative. <a href="resources/earth/credits.html" target="_blank" rel="noopener">Sources</a></div>';
+    const surveyCredit=element("a",credits.querySelector("summary"));
+    surveyCredit.target="_blank";surveyCredit.rel="noopener";
+    let lastSurvey="";
+    const syncSurveyCredit=()=>{const credit=survey.stats.visible?survey.stats.credit:"";if(lastSurvey===credit)return;lastSurvey=credit;surveyCredit.textContent=lastSurvey?" · "+lastSurvey:"";surveyCredit.href=survey.stats.url;};
+    map.addEventListener("didrender",syncSurveyCredit);
+    const terrainCredits = element("span", credits.querySelector("summary"));
+    function updateTerrainCredits() {
+        terrainCredits.replaceChildren();
+        const add = (label, href) => {
+            const link = document.createElement("a");
+            link.href = href;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.textContent = label;
+            terrainCredits.append(" · ", link);
+        };
+        if (new URLSearchParams(location.search).get("imagery") === "worldcover") {
+            add("© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium", "https://esa-worldcover.org/en/data-access");
+            add("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/");
+        }
+        if (new URLSearchParams(location.search).get("imagery") === "swissimage")
+            add("© swisstopo", "https://www.swisstopo.admin.ch/en/faq-free-geodata");
+        const selected = require("./open-imagery").sources[new URLSearchParams(location.search).get("imagery")];
+        if (selected?.credit) add(selected.credit, selected.creditUrl);
+        if (source.worldTerrain) add("© Mapterhorn", "https://mapterhorn.com/attribution/");
+        if (source.terrainDetail) add("USGS 3DEP", "https://www.usgs.gov/3d-elevation-program");
+    }
+    updateTerrainCredits();
     document.body.appendChild(credits);
     return {
         updateSun,
+        syncMode: comparison.syncMode,
         dispose() {
             document.removeEventListener("fullscreenchange", updateFullscreen);
             document.removeEventListener("pointerdown", dismiss);
             document.removeEventListener("keydown", keydown);
             map.removeEventListener("didrender", refreshSun);
+            comparison.dispose();
             root.remove();
+            map.removeEventListener("didrender",syncSurveyCredit);
             credits.remove();
             style.remove();
         }

@@ -215,6 +215,8 @@ export class MapControls extends EventDispatcher {
      * @private
      */
     private m_zoomLevelDeltaOnMouseWheel?: number;
+    /** Interpret scroll distance continuously on precision trackpads and mouse wheels. */
+    continuousWheelZoom = false;
 
     /**
      * Zoom level delta when using the UI controls.
@@ -290,9 +292,7 @@ export class MapControls extends EventDispatcher {
 
     // Internal variables for animating zoom.
     private m_zoomIsAnimated: boolean = false;
-    private m_zoomDeltaRequested: number = 0;
     private readonly m_zoomTargetNormalizedCoordinates: THREE.Vector2 = new THREE.Vector2();
-    private m_zoomAnimationTime: number = 0;
     private m_zoomAnimationStartTime: number = 0;
     private m_startZoom: number = 0;
     private m_targetedZoom?: number;
@@ -364,7 +364,6 @@ export class MapControls extends EventDispatcher {
         this.handlePan = this.handlePan.bind(this);
         this.tilt = this.tilt.bind(this);
         this.resetNorth = this.resetNorth.bind(this);
-        this.assignZoomAfterTouchZoomRender = this.assignZoomAfterTouchZoomRender.bind(this);
 
         if (disposeWithMapView) {
             // Catch the disposal of `MapView`.
@@ -464,11 +463,9 @@ export class MapControls extends EventDispatcher {
 
         this.dispatchEvent(MAPCONTROL_EVENT_BEGIN_INTERACTION);
 
-        // Register the zoom request
         this.m_startZoom = this.currentZoom;
-        this.m_zoomDeltaRequested = zoomLevel - this.zoomLevelTargeted;
-
         this.stopExistingAnimations();
+        this.m_targetedZoom = THREE.MathUtils.clamp(zoomLevel, this.minZoomLevel, this.maxZoomLevel);
 
         // Assign the new animation start time.
         this.m_zoomAnimationStartTime = performance.now();
@@ -578,15 +575,6 @@ export class MapControls extends EventDispatcher {
                 ? this.currentTilt
                 : this.m_currentTilt
             : this.m_targetedTilt;
-    }
-
-    private assignZoomAfterTouchZoomRender() {
-        this.m_currentZoom = this.mapView.zoomLevel;
-        this.m_targetedZoom = this.mapView.zoomLevel;
-        this.mapView.removeEventListener(
-            MapViewEventNames.AfterRender,
-            this.assignZoomAfterTouchZoomRender
-        );
     }
 
     private stopExistingAnimations() {
@@ -705,43 +693,12 @@ export class MapControls extends EventDispatcher {
     }
 
     private handleZoom() {
-        let resetZoomState = false;
-        if (this.m_zoomDeltaRequested !== 0) {
-            this.m_targetedZoom = Math.max(
-                Math.min(this.zoomLevelTargeted + this.m_zoomDeltaRequested, this.maxZoomLevel),
-                this.minZoomLevel
-            );
-            this.m_zoomDeltaRequested = 0;
-        }
-        if (this.inertiaEnabled && this.zoomInertiaDampingDuration > 0) {
-            if (!this.m_zoomIsAnimated) {
-                this.m_zoomIsAnimated = true;
-                this.mapView.addEventListener(MapViewEventNames.AfterRender, this.handleZoom);
-            }
-            const currentTime = performance.now();
-            this.m_zoomAnimationTime = (currentTime - this.m_zoomAnimationStartTime) / 1000;
-            const zoomFinished = this.m_zoomAnimationTime > this.zoomInertiaDampingDuration;
-            if (zoomFinished) {
-                if (this.m_needsRenderLastFrame) {
-                    this.m_needsRenderLastFrame = false;
-                    this.m_zoomAnimationTime = this.zoomInertiaDampingDuration;
-
-                    resetZoomState = true;
-                    this.stopZoom();
-                }
-            } else {
-                this.m_needsRenderLastFrame = true;
-            }
-        }
-
-        this.currentZoom =
-            !this.inertiaEnabled || Math.abs(this.zoomLevelTargeted - this.m_startZoom) < EPSILON
-                ? this.zoomLevelTargeted
-                : this.easeOutCirc(
-                      this.m_startZoom,
-                      this.zoomLevelTargeted,
-                      Math.min(1, this.m_zoomAnimationTime / this.zoomInertiaDampingDuration)
-                  );
+        const duration = this.zoomInertiaDampingDuration;
+        const elapsed = (performance.now() - this.m_zoomAnimationStartTime) / 1000;
+        const progress = this.inertiaEnabled && duration > 0 ? Math.min(1, elapsed / duration) : 1;
+        const target = this.zoomLevelTargeted;
+        const finished = progress === 1 || Math.abs(target - this.m_startZoom) < EPSILON;
+        this.currentZoom = finished ? target : this.easeOutCirc(this.m_startZoom, target, progress);
 
         const success = MapViewUtils.zoomOnTargetPosition(
             this.mapView,
@@ -751,17 +708,27 @@ export class MapControls extends EventDispatcher {
             this.m_maxTiltAngle
         );
 
-        if (resetZoomState || !success) {
-            this.m_targetedZoom = undefined;
-            this.m_currentZoom = undefined;
+        if (!success) {
+            this.stopZoom();
+        } else if (finished) {
+            this.mapView.removeEventListener(MapViewEventNames.AfterRender, this.handleZoom);
+            // MapView publishes the new zoom on the next draw. Consecutive
+            // synchronous calls must see the target until that frame arrives.
+            this.mapView.addEventListener(MapViewEventNames.AfterRender, this.stopZoom);
+        } else if (!this.m_zoomIsAnimated) {
+            this.m_zoomIsAnimated = true;
+            this.mapView.addEventListener(MapViewEventNames.AfterRender, this.handleZoom);
         }
         this.updateMapView();
     }
 
-    private stopZoom() {
+    private readonly stopZoom = () => {
+        this.mapView.removeEventListener(MapViewEventNames.AfterRender, this.stopZoom);
         this.mapView.removeEventListener(MapViewEventNames.AfterRender, this.handleZoom);
         this.m_zoomIsAnimated = false;
-    }
+        this.m_targetedZoom = undefined;
+        this.m_currentZoom = undefined;
+    };
 
     /**
      * Method to flip crêpes.
@@ -888,6 +855,8 @@ export class MapControls extends EventDispatcher {
         domElement.addEventListener("touchmove", onTouchMove, false);
 
         this.dispose = () => {
+            this.stopExistingAnimations();
+            this.m_cleanupMouseEventListeners?.();
             domElement.removeEventListener("dblclick", onMouseDoubleClick, false);
             domElement.removeEventListener("contextmenu", onContextMenu, false);
             domElement.removeEventListener("mousedown", onMouseDown, false);
@@ -937,6 +906,7 @@ export class MapControls extends EventDispatcher {
             return;
         }
 
+        this.stopZoom();
         this.dispatchEvent(MAPCONTROL_EVENT_BEGIN_INTERACTION);
 
         const mousePos = this.getPointerPosition(event);
@@ -1008,7 +978,6 @@ export class MapControls extends EventDispatcher {
         }
 
         this.m_lastMousePosition.set(mousePos.x, mousePos.y);
-        this.m_zoomAnimationStartTime = performance.now();
 
         this.updateMapView();
         event.preventDefault();
@@ -1047,10 +1016,20 @@ export class MapControls extends EventDispatcher {
             height
         );
 
-        this.setZoomLevel(
-            this.mapView.zoomLevel - this.zoomLevelDeltaOnMouseWheel * Math.sign(event.deltaY),
-            screenTarget
-        );
+        if (this.continuousWheelZoom) {
+            // A conventional wheel detent arrives as about 100–120 CSS pixels
+            // or three lines. Keep precision-wheel input fractional.
+            const unitsPerLevel = event.deltaMode === 1 ? 3 : event.deltaMode === 2 ? 1 : 100;
+            // Compress large wheel packets while retaining fine trackpad motion.
+            // Every packet contributes, including those arriving during a spin.
+            const delta = this.zoomLevelDeltaOnMouseWheel * Math.tanh(1.5 * event.deltaY / unitsPerLevel);
+            if (delta) this.setZoomLevel(this.zoomLevelTargeted - delta, screenTarget);
+        } else {
+            this.setZoomLevel(
+                this.mapView.zoomLevel - this.zoomLevelDeltaOnMouseWheel * Math.sign(event.deltaY),
+                screenTarget
+            );
+        }
 
         event.preventDefault();
         event.stopPropagation();
@@ -1233,6 +1212,7 @@ export class MapControls extends EventDispatcher {
             return;
         }
 
+        this.stopZoom();
         this.m_tapStartTime = performance.now();
         this.m_fingerMoved = false;
 
@@ -1330,8 +1310,6 @@ export class MapControls extends EventDispatcher {
             });
         }
 
-        this.m_zoomAnimationStartTime = performance.now();
-
         this.updateMapView();
         event.preventDefault();
         event.stopPropagation();
@@ -1356,7 +1334,8 @@ export class MapControls extends EventDispatcher {
 
     private handleDoubleTap() {
         // Continue only if no touchmove happened and zoom's enabled.
-        if (this.m_fingerMoved || !this.zoomEnabled) {
+        if (this.m_fingerMoved || !this.zoomEnabled || this.m_touchState.touches.length !== 1) {
+            this.m_isDoubleTap = false;
             return;
         }
 
@@ -1377,8 +1356,8 @@ export class MapControls extends EventDispatcher {
 
         // Continue only if the delay between the two taps is short enough.
         if (now - this.m_lastSingleTapTime > this.doubleTapTime * 1000) {
-            // If too long, restart double tap validator too.
-            this.m_isDoubleTap = false;
+            // This tap starts the next possible pair.
+            this.m_lastSingleTapTime = now;
             return;
         }
 

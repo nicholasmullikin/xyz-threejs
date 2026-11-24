@@ -33,6 +33,7 @@ export function getWebGLRendererStub(sandbox: sinon.SinonSandbox, clearColorStub
         getSize,
         getPixelRatio: () => undefined,
         setPixelRatio: () => undefined,
+        state: { buffers: { stencil: { setMask: sandbox.stub() } } },
         clear: () => undefined,
         render: () => undefined,
         dispose: () => undefined,

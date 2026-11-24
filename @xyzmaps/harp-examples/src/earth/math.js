@@ -17,27 +17,55 @@ function transform(child, parent) {
     const scale = 2 ** (parent.z - child.z);
     return [scale, scale, child.x * scale - parent.x, 1 - (child.y + 1) * scale + parent.y];
 }
-let oceanTile;
-async function fetchTerrain(tileKey, token, signal) {
+function retryDelay(ms, signal) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(done, ms);
+        function done() {
+            signal?.removeEventListener("abort", abort);
+            resolve();
+        }
+        function abort() {
+            clearTimeout(timer);
+            reject(new DOMException("Cancelled", "AbortError"));
+        }
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+    });
+}
+const { retryDelay: responseDelay } = require("./imagery-backoff");
+async function fetchTerrain(tileKey, token, signal, repair = false) {
     const { level: z, column: x, row: y } = tileKey;
-    const response = await fetch(
-        `https://api.mapbox.com/v4/mapbox.terrain-rgb/${z}/${x}/${y}.pngraw?access_token=${token}`,
-        { signal }
-    );
-    if (response.ok) return response.arrayBuffer();
-    // The provider returns 404 for all-water tiles. Generate a true zero-height
-    // DEM, rather than treating an ocean as a failed terrain refinement.
-    if (response.status !== 404) throw new Error(`Terrain request failed: HTTP ${response.status}`);
-    if (!oceanTile)
-        oceanTile = new Promise(resolve => {
-            const canvas = document.createElement("canvas");
-            canvas.width = canvas.height = 256;
-            const ctx = canvas.getContext("2d");
-            ctx.fillStyle = "rgb(1,134,160)";
-            ctx.fillRect(0, 0, 256, 256);
-            canvas.toBlob(async blob => resolve(await blob.arrayBuffer()), "image/png");
-        });
-    return (await oceanTile).slice(0);
+    const url = `https://api.mapbox.com/v4/mapbox.terrain-rgb/${z}/${x}/${y}.pngraw?access_token=${token}`;
+    for (let attempt = 0; ; attempt++) {
+        let retry = true;
+        try {
+            const response = await fetch(url, { signal, cache: repair ? "reload" : "default" });
+            if (response.ok) {
+                const bytes = await response.arrayBuffer();
+                if (bytes.byteLength) return bytes;
+                retry = false;
+                throw Error("Empty terrain raster");
+            }
+            // Terrain-RGB omits all-water tiles. No PNG synthesis or decompression is needed.
+            if (response.status === 404) return { kind: "empty-ocean-dem" };
+            const retryMs = responseDelay(response.headers, response.status);
+            retry = (response.status === 408 || response.status >= 500) && retryMs === undefined;
+            throw Object.assign(new Error(`Terrain request failed: HTTP ${response.status}`), {
+                status: response.status,
+                retryMs
+            });
+        } catch (error) {
+            if (
+                signal?.aborted ||
+                error?.name === "AbortError" ||
+                !retry ||
+                globalThis.navigator?.onLine === false ||
+                attempt >= 2
+            )
+                throw error;
+            await retryDelay(300 * 2 ** attempt, signal);
+        }
+    }
 }
 function triangleHeight(h00, h10, h01, h11, x, y) {
     return x + y <= 1

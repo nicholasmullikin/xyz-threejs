@@ -662,6 +662,10 @@ export class TileGeometryCreator {
                 srcGeometry.vertexAttributes?.forEach(vertexAttribute => {
                     const buffer = attachment.getBufferAttribute(vertexAttribute);
                     bufferGeometry.setAttribute(vertexAttribute.name, buffer);
+                    if (vertexAttribute.metadata) {
+                        const metadata = bufferGeometry.userData.attributeMetadata ??= {};
+                        metadata[vertexAttribute.name] = vertexAttribute.metadata;
+                    }
                 });
 
                 srcGeometry.interleavedVertexAttributes?.forEach(attr => {

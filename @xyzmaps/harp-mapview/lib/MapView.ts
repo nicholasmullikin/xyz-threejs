@@ -342,6 +342,8 @@ export interface MapViewOptions extends TextElementsRendererOptions, Partial<Loo
     clipPlanesEvaluator?: ClipPlanesEvaluator;
     /** Preserve depth precision for scenes spanning ground level to orbit. */
     logarithmicDepthBuffer?: boolean;
+    /** Prefer a WebGL 2 context, with Three's normal fallback to WebGL 1. */
+    preferWebGL2?: boolean;
 
     /**
      * Set to true to extend the frustum culling. This improves the rejection of some tiles, which
@@ -487,6 +489,9 @@ export interface MapViewOptions extends TextElementsRendererOptions, Partial<Loo
      */
     dynamicPixelRatio?: number;
 
+    /** Apply a bounded sharpening filter when upsampling dynamic frames. */
+    sharpenDynamicRendering?: boolean;
+
     /**
      * Set maximum FPS (Frames Per Second). If VSync in enabled, the specified number may not be
      * reached, but instead the next smaller number than `maxFps` that is equal to the refresh rate
@@ -573,6 +578,14 @@ export interface MapViewOptions extends TextElementsRendererOptions, Partial<Loo
      * @default 256
      */
     lodMinTilePixelSize?: number;
+
+    /**
+     * Use the footprint of spherical tiles to estimate their required detail
+     * when conservative geometry-height padding exceeds a tile's width.
+     * Visibility testing always uses the full three-dimensional bounds.
+     * @default false
+     */
+    useTerrainFootprintLod?: boolean;
 
     /**
      * Enable shadows in the map. Shadows will only be casted on features that use the "standard"
@@ -998,7 +1011,8 @@ export class MapView extends EventDispatcher {
         this.canvas.addEventListener("webglcontextrestored", this.onWebGLContextRestored);
 
         // Initialization of the renderer, enable backward compatibility with three.js <= 0.117
-        this.m_renderer = new ((THREE as any).WebGL1Renderer ?? THREE.WebGLRenderer)({
+        const Renderer = options.preferWebGL2 ? THREE.WebGLRenderer : ((THREE as any).WebGL1Renderer ?? THREE.WebGLRenderer);
+        this.m_renderer = new Renderer({
             canvas: this.canvas,
             logarithmicDepthBuffer: options.logarithmicDepthBuffer === true,
             context: this.m_options.context,
@@ -1080,7 +1094,8 @@ export class MapView extends EventDispatcher {
             width,
             height,
             this.m_options.dynamicPixelRatio,
-            mapPassAntialiasSettings
+            mapPassAntialiasSettings,
+            this.m_options.sharpenDynamicRendering
         );
 
         this.m_animatedExtrusionHandler = new AnimatedExtrusionHandler(this);
@@ -3454,6 +3469,9 @@ export class MapView extends EventDispatcher {
         this.updateCameras();
         this.updateEnv();
 
+        // WebGL clears respect the last stencil write mask. A read-only
+        // overlay may have left it at zero on the preceding frame.
+        this.m_renderer.state.buffers.stencil.setMask(0xff);
         this.m_renderer.clear();
 
         // clear the scenes
@@ -3707,7 +3725,8 @@ export class MapView extends EventDispatcher {
                 this.m_visibleTileSetOptions.extendedFrustumCulling,
                 this.m_tileWrappingEnabled,
                 enableMixedLod,
-                this.m_lodMinTilePixelSize
+                this.m_lodMinTilePixelSize,
+                this.m_options.useTerrainFootprintLod
             ),
             this.m_tileGeometryManager,
             this.m_visibleTileSetOptions,
@@ -3753,7 +3772,6 @@ export class MapView extends EventDispatcher {
             return this.m_thisFrameTilesChanged;
         }
         const renderList = this.m_visibleTiles.dataSourceTileList;
-        this.prepareRenderTiles?.(renderList);
 
         const tileIdList: string[] = [];
 

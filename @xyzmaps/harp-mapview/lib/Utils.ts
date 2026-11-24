@@ -130,6 +130,37 @@ export namespace MapViewUtils {
      */
     export interface MemoryUsage extends Object3DUtils.MemoryUsage {}
 
+    function zoomToTerrainAnchor(
+        camera: THREE.PerspectiveCamera,
+        anchor: THREE.Vector3,
+        center: THREE.Vector3,
+        distance: number,
+        maxTiltAngle: number
+    ): boolean {
+        const currentDistance = camera.position.distanceTo(center);
+        if (currentDistance === 0) {
+            return false;
+        }
+        // A scaling about the picked point preserves its screen position. On a
+        // sloping terrain plane it also scales the centre-ray distance by exactly
+        // the same ratio, even when the two ground points differ in elevation.
+        const next = anchor.clone().lerp(camera.position, distance / currentDistance);
+        const forward = camera.getWorldDirection(new THREE.Vector3());
+        const impact = new THREE.Vector3().crossVectors(next, forward).length();
+        if (
+            next.dot(forward) >= 0 ||
+            impact > center.length() * Math.sin(maxTiltAngle) ||
+            next.length() < EarthConstants.EQUATORIAL_RADIUS
+        ) {
+            // A foreground pick at a shallow pitch can lift the centre ray over
+            // the horizon on zoom-out. Defer to the centred orbit in that case.
+            return false;
+        }
+        camera.position.copy(next);
+        camera.updateMatrixWorld();
+        return true;
+    }
+
     /**
      * Zooms and moves the map in such a way that the given target position remains at the same
      * position after the zoom.
@@ -151,6 +182,29 @@ export namespace MapViewUtils {
     ): boolean {
         const { elevationProvider, camera, projection } = mapView;
 
+        const terrainGlobe =
+            projection.type === ProjectionType.Spherical &&
+            elevationProvider?.getCameraTarget !== undefined &&
+            !mapView.geoMaxBounds;
+        const newCameraDistance = calculateDistanceFromZoomLevel(mapView, zoomLevel);
+        let meshTarget: THREE.Vector3 | undefined;
+        if (terrainGlobe && elevationProvider?.getCameraTarget) {
+            camera.updateMatrixWorld();
+            meshTarget = elevationProvider.getCameraTarget(camera);
+            if (meshTarget && projection.groundDistance(camera.position) < 100000) {
+                const principalPoint = CameraUtils.getPrincipalPoint(camera, cache.vector2[0]);
+                const anchor =
+                    targetNDCx === principalPoint.x && targetNDCy === principalPoint.y
+                        ? meshTarget
+                        : elevationProvider.rayCast(
+                              (targetNDCx + 1) * 0.5 * mapView.canvas.clientWidth,
+                              (1 - targetNDCy) * 0.5 * mapView.canvas.clientHeight
+                          );
+                if (anchor && zoomToTerrainAnchor(camera, anchor, meshTarget, newCameraDistance, maxTiltAngle)) {
+                    return true;
+                }
+            }
+        }
         // Use for now elevation at camera position. See getTargetAndDistance.
         const elevation = elevationProvider
             ? elevationProvider.getHeight(
@@ -164,12 +218,37 @@ export namespace MapViewUtils {
 
         // Compute current camera target, it may not be the one set in MapView, e.g. when this
         // function is called multiple times between frames.
-        const cameraTarget = MapViewUtils.getTargetAndDistance(
-            projection,
-            camera,
-            elevationProvider
-        ).target;
-        const newCameraDistance = calculateDistanceFromZoomLevel(mapView, zoomLevel);
+        let cameraTarget;
+        if (terrainGlobe) {
+            // A tangent-distance estimate is useful for choosing map LOD, but its
+            // endpoint can be in space. Zooming about it repeatedly compounds the miss.
+            const forward = camera.getWorldDirection(new THREE.Vector3());
+            cameraTarget = meshTarget ??
+                rayCastWorldCoordinates(mapView, 0, 0, elevation);
+            if (!cameraTarget || forward.dot(cameraTarget) >= 0) {
+                const closest = Math.max(0, -camera.position.dot(forward));
+                cameraTarget = camera.position.clone().addScaledVector(forward, closest)
+                    .setLength(EarthConstants.EQUATORIAL_RADIUS);
+            }
+            // Orbit on the visible side of this physical anchor. Clamp the angle
+            // at the target itself, which stays well-defined across the horizon.
+            const up = cameraTarget.clone().normalize();
+            const backward = camera.position.clone().sub(cameraTarget).normalize();
+            const tangent = backward.clone().addScaledVector(up, -backward.dot(up));
+            if (backward.dot(up) < Math.cos(maxTiltAngle)) {
+                if (tangent.lengthSq() < 1e-12) {
+                    backward.copy(up);
+                } else {
+                    backward.copy(up).multiplyScalar(Math.cos(maxTiltAngle))
+                        .addScaledVector(tangent.normalize(), Math.sin(maxTiltAngle));
+                }
+            }
+            camera.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(
+                forward, backward.negate()
+            ));
+        } else {
+            cameraTarget = MapViewUtils.getTargetAndDistance(projection, camera, elevationProvider).target;
+        }
 
         if (mapView.geoMaxBounds) {
             // If map view has maximum bounds set, constrain camera target and distance to ensure
@@ -193,13 +272,13 @@ export namespace MapViewUtils {
 
         // In sphere, we may have to also orbit the camera around the target, in order to limit the
         // the tilt to `maxTiltAngle`, as we change this tilt by changing the camera's height above.
-        if (projection.type === ProjectionType.Spherical) {
+        if (projection.type === ProjectionType.Spherical && !terrainGlobe) {
             // FIXME: We cannot use mapView.tilt here b/c it does not reflect the latest camera
             // changes.
             const tilt = extractCameraTilt(camera, projection);
             const deltaTilt = tilt - maxTiltAngle;
             if (deltaTilt > 0) {
-                orbitAroundScreenPoint(mapView, { deltaTilt, maxTiltAngle });
+                orbitAroundScreenPoint(mapView, { deltaAzimuth: 0, deltaTilt: -deltaTilt, maxTiltAngle });
             }
         }
 
@@ -701,6 +780,8 @@ export namespace MapViewUtils {
         camera: THREE.Camera,
         elevationProvider?: ElevationProvider
     ): { target: THREE.Vector3; distance: number; final: boolean } {
+        const meshTarget = elevationProvider?.getCameraTarget?.(camera);
+        if (meshTarget) return { target: meshTarget, distance: camera.position.distanceTo(meshTarget), final: true };
         const cameraPitch = extractAttitude({ projection }, camera).pitch;
 
         //FIXME: For now we keep the old behaviour when terrain is enabled (i.e. use the camera

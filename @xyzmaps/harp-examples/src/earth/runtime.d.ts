@@ -6,17 +6,19 @@ export interface EarthRuntime {
     update(entries: ReadonlyArray<DataSourceTileList>): void;
     createTileMaterial(tile?: Tile): Material;
     dispose(): void;
+    performance: { snapshot(): unknown; gpuFrameMs(): number | undefined };
     stats: {
         requests: number;
         failures: number;
         fading: number;
         fallback: number;
         cache: number;
+        cacheBytes: number;
         pending: number;
         untextured: number;
     };
     setSunHour(hour: number): void;
-    setMode(mode: "a" | "c"): void;
+    setMode(mode: "a" | "c" | "reference"): void;
     setContours(value: boolean): void;
     setHillshade(value: number): void;
     readonly sun: import("three").Vector3;
@@ -36,7 +38,7 @@ export interface EarthRuntime {
             lowResolution: boolean;
             historyFrames?: number;
         };
-        setCloudPreset(id: number): void;
+        setCloudPreset(id: number | "forecast"): void;
         setCloudQuality(name: string): void;
     };
 }

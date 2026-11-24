@@ -6,7 +6,7 @@
  */
 import { GeoCoordinates, MathUtils } from "@xyzmaps/harp-geoutils";
 import { LookAtParams, MapView } from "@xyzmaps/harp-mapview";
-import THREE = require("three");
+import * as THREE from "three";
 
 import { CameraKeyTrackAnimationOptions, ControlPoint } from "./CameraKeyTrackAnimation";
 

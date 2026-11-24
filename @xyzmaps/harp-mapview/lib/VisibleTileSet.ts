@@ -373,6 +373,11 @@ export interface DataSourceTileList {
     renderedTiles: Map<number, Tile>;
 }
 
+interface VisibleKeys {
+    tileKeys: Array<{ dataSource: DataSource; visibleTileKeys: TileKeyEntry[] }>;
+    allBoundingBoxesFinal: boolean;
+}
+
 // Sort by distance to camera, now the tiles that are further away are at the end
 // of the list.
 //
@@ -406,6 +411,24 @@ export class VisibleTileSet {
     dataSourceTileList: DataSourceTileList[] = [];
     allVisibleTilesLoaded: boolean = false;
 
+    private m_stationarySelection?: {
+        projection: Projection;
+        height: number;
+        latitude: number;
+        longitude: number;
+        zoom: number;
+        sources: Array<{
+            source: DataSource;
+            scheme: TilingScheme;
+            level: number;
+            minHeight: number;
+            maxHeight: number;
+            revision: number | undefined;
+        }>;
+        result: VisibleKeys;
+    };
+    private readonly m_selectionView = new THREE.Matrix4();
+    private readonly m_selectionProjection = new THREE.Matrix4();
     private readonly m_cameraOverride = new THREE.PerspectiveCamera();
     private readonly m_dataSourceCache: DataSourceCache;
     private m_viewRange: ViewRanges = {
@@ -566,16 +589,36 @@ export class VisibleTileSet {
             dataSources,
             elevationRangeSource
         );
+        const previous = this.dataSourceTileList;
+        const covers = new Map<DataSource, Array<{ tileKey: TileKey; offset: number }>>();
         this.dataSourceTileList = [];
         this.m_coveringMap.clear();
         for (const { dataSource, visibleTileKeys } of visibleTileKeysResult.tileKeys) {
-            visibleTileKeys.sort(compareDistances);
-
             // Create actual tiles only for the allowed number of visible tiles
             const dataZoomLevel = dataSource.getDataZoomLevel(zoomLevel);
 
+            const limit = this.options.maxVisibleDataSourceTiles;
+            const selected =
+                visibleTileKeys.length > limit && dataSource.selectBudgetedTiles
+                    ? dataSource.selectBudgetedTiles(visibleTileKeys, limit)
+                    : visibleTileKeys;
+            const plan = dataSource.planTileRequests?.(
+                selected,
+                (key, offset) => {
+                    const tile = this.m_dataSourceCache.get(key.mortonCode(), offset, dataSource);
+                    if (!tile || tile.disposed) return undefined;
+                    return tile.hasGeometry && !tile.delayRendering ? "ready" : "pending";
+                },
+                previous.find(list => list.dataSource === dataSource)?.renderedTiles.values() ?? []
+            );
+            if (plan && !plan.complete) {
+                covers.set(dataSource, plan.rendered);
+                for (const entry of plan.retain) {
+                    this.getCachedTile(dataSource, entry.tileKey, entry.offset, frameNumber);
+                }
+            }
             const visibleResult = this.processVisibleTiles(
-                visibleTileKeys,
+                plan?.requests ?? selected,
                 dataSource,
                 frameNumber,
                 {
@@ -583,6 +626,7 @@ export class VisibleTileSet {
                 },
                 true
             );
+            if (plan && !plan.complete) visibleResult.allDataSourceTilesLoaded = false;
             const dependentResult = this.processVisibleTiles(
                 visibleResult.dependentTiles,
                 dataSource,
@@ -613,7 +657,7 @@ export class VisibleTileSet {
         this.allVisibleTilesLoaded =
             allVisibleTilesLoaded && visibleTileKeysResult.allBoundingBoxesFinal;
 
-        this.populateRenderedTiles();
+        this.populateRenderedTiles(covers, frameNumber);
 
         this.forEachCachedTile(tile => {
             // Remove all tiles that are still being loaded, but are no longer visible. They have to
@@ -1063,10 +1107,10 @@ export class VisibleTileSet {
             searchLevelsDown > 0 && searchLevelsUp > 0
                 ? SearchDirection.BOTH
                 : searchLevelsDown > 0
-                ? SearchDirection.DOWN
-                : searchLevelsUp > 0
-                ? SearchDirection.UP
-                : SearchDirection.NONE;
+                  ? SearchDirection.DOWN
+                  : searchLevelsUp > 0
+                    ? SearchDirection.UP
+                    : SearchDirection.NONE;
         return { searchDirection, searchLevelsUp, searchLevelsDown };
     }
 
@@ -1081,9 +1125,33 @@ export class VisibleTileSet {
      * [[allowOverlappingTiles]] flag.
      *
      */
-    private populateRenderedTiles() {
+    private populateRenderedTiles(
+        covers: Map<DataSource, Array<{ tileKey: TileKey; offset: number }>>,
+        frameNumber: number
+    ) {
         this.dataSourceTileList.forEach(renderListEntry => {
             const renderedTiles = renderListEntry.renderedTiles;
+
+            const cover = covers.get(renderListEntry.dataSource);
+            if (cover) {
+                for (const covered of cover) {
+                    const { tileKey, offset } = covered;
+                    const tile =
+                        covered instanceof Tile
+                            ? covered
+                            : this.getCachedTile(
+                                  renderListEntry.dataSource,
+                                  tileKey,
+                                  offset,
+                                  frameNumber
+                              );
+                    if (tile && tile.hasGeometry && !tile.delayRendering) {
+                        tile.levelOffset = tileKey.level - renderListEntry.zoomLevel;
+                        renderedTiles.set(tile.uniqueKey, tile);
+                    }
+                }
+                return;
+            }
 
             // Tiles for which we need to fall(back/forward) to.
             const incompleteTiles: number[] = [];
@@ -1349,10 +1417,37 @@ export class VisibleTileSet {
         zoomLevel: number,
         dataSources: DataSource[],
         elevationRangeSource: ElevationRangeSource | undefined
-    ): {
-        tileKeys: Array<{ dataSource: DataSource; visibleTileKeys: TileKeyEntry[] }>;
-        allBoundingBoxesFinal: boolean;
-    } {
+    ): VisibleKeys {
+        const { camera, mapView } = this.m_frustumIntersection;
+        const cacheable =
+            !elevationRangeSource &&
+            dataSources.length > 0 &&
+            dataSources.every(ds => ds.stationaryTileSelectionRevision !== undefined);
+        const previous = this.m_stationarySelection;
+        if (
+            cacheable &&
+            previous &&
+            previous.zoom === zoomLevel &&
+            previous.height === mapView.viewportHeight &&
+            previous.projection === mapView.projection &&
+            previous.latitude === mapView.target.latitude &&
+            previous.longitude === mapView.target.longitude &&
+            this.m_selectionView.equals(camera.matrixWorldInverse) &&
+            this.m_selectionProjection.equals(camera.projectionMatrix) &&
+            previous.sources.length === dataSources.length &&
+            previous.sources.every(
+                ({ source, scheme, level, minHeight, maxHeight, revision }, i) =>
+                    source === dataSources[i] &&
+                    scheme === source.getTilingScheme() &&
+                    level === source.getDataZoomLevel(zoomLevel) &&
+                    minHeight === source.minGeometryHeight &&
+                    maxHeight === source.maxGeometryHeight &&
+                    revision === source.stationaryTileSelectionRevision
+            )
+        ) {
+            return previous.result;
+        }
+        this.m_stationarySelection = undefined;
         const tileKeys = Array<{
             dataSource: DataSource;
             visibleTileKeys: TileKeyEntry[];
@@ -1416,11 +1511,33 @@ export class VisibleTileSet {
                         visibleTileKeys.push(tileKeyEntry);
                     }
                 }
+                visibleTileKeys.sort(compareDistances);
                 tileKeys.push({ dataSource, visibleTileKeys });
             }
         }
 
-        return { tileKeys, allBoundingBoxesFinal };
+        const result = { tileKeys, allBoundingBoxesFinal };
+        if (cacheable && allBoundingBoxesFinal) {
+            this.m_selectionProjection.copy(camera.projectionMatrix);
+            this.m_selectionView.copy(camera.matrixWorldInverse);
+            this.m_stationarySelection = {
+                projection: mapView.projection,
+                height: mapView.viewportHeight,
+                latitude: mapView.target.latitude,
+                longitude: mapView.target.longitude,
+                zoom: zoomLevel,
+                sources: dataSources.map(source => ({
+                    source,
+                    scheme: source.getTilingScheme(),
+                    level: source.getDataZoomLevel(zoomLevel),
+                    minHeight: source.minGeometryHeight,
+                    maxHeight: source.maxGeometryHeight,
+                    revision: source.stationaryTileSelectionRevision
+                })),
+                result
+            };
+        }
+        return result;
     }
 }
 

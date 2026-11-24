@@ -45,7 +45,7 @@ describe("MapControls", function () {
         mouseWheelHandler({
             offsetX: 0,
             offsetY: 0,
-            delta,
+            deltaY: delta,
             preventDefault: () => {
                 /*noop*/
             },
@@ -72,8 +72,10 @@ describe("MapControls", function () {
                 /*noop*/
             }
         } as any;
-        touchStartHandler(fakeTouchEvent);
-        touchEndHandler(fakeTouchEvent);
+        for (let i = 0; i < 2; i++) {
+            touchStartHandler({ ...fakeTouchEvent, touches: [{ clientX: 400, clientY: 300 }] } as any);
+            touchEndHandler(fakeTouchEvent);
+        }
     }
 
     function mouseMove(button: number, x: number, y: number) {
@@ -481,8 +483,6 @@ describe("MapControls", function () {
             sandbox.stub(mapView, "focalLength").get(() => {
                 return 100;
             });
-            // needed to get the initial zoom level from MapView.
-            mapControls["assignZoomAfterTouchZoomRender"]();
             expect(mapControls.zoomLevelTargeted).to.equal(initialZoomLevel);
         });
 
